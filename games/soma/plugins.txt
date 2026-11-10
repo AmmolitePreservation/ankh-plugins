@@ -1,0 +1,4 @@
+# The plugins the loader loads into SOMA, one DLL per line in load order, from the ankh-plugins folder.
+# A line starting with # switches that plugin off. A plugin a newer release adds is appended here with its
+# shipped state; a line naming a plugin the release does not ship is removed and noted in the loader's log.
+borderless-fit.dll

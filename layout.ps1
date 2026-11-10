@@ -1,0 +1,199 @@
+<#
+.SYNOPSIS
+Lays out a game's build\<game>\bin as it goes into that game's install folder, so an install and a release hold the
+same files.
+
+.DESCRIPTION
+games\<game>\game.cfg names the game's executable relative to its install folder: version.dll goes beside it, and
+the ankh-plugins folder beside it gets every plugin the game's plugins.txt names, all of which a newer build
+replaces. No settings files: each plugin carries its own and writes or updates them in the ankh-plugins folder when the
+game starts, so a player's settings are never replaced. The diagnostic plugins never ship; Copy-PluginLayout -diagnostics
+adds them to an install, and the loader keeps a listed plugin whose DLL the folder holds. game.cfg's architecture (x64
+or x86) picks the build.
+#>
+
+$repositoryFolder = $PSScriptRoot
+
+function Get-GameFolder {
+  param([string]$game)
+  $folder = Join-Path (Join-Path $repositoryFolder "games") $game
+  if (-not (Test-Path -LiteralPath (Join-Path $folder "game.cfg"))) {
+    throw "games\$game\game.cfg does not exist"
+  }
+  return $folder
+}
+
+function Get-GameSetting {
+  param([string]$game, [string]$key)
+  $configPath = Join-Path (Get-GameFolder $game) "game.cfg"
+  $values = @()
+  foreach ($line in Get-Content -LiteralPath $configPath) {
+    if ($line -match ('^\s*' + $key + '\s*=\s*(.+?)\s*$')) {
+      $values += $Matches[1]
+    }
+  }
+  if ($values.Count -ne 1) {
+    throw "$configPath must set $key exactly once"
+  }
+  return $values[0]
+}
+
+function Get-GameExecutable {
+  param([string]$game)
+  return Get-GameSetting $game "executable"
+}
+
+function Get-GameCompanions {
+  # Programs beside the game's executable that also get the plugins, such as a launcher step the game cannot start
+  # without: file names, any number of companion= lines.
+  param([string]$game)
+  $configPath = Join-Path (Get-GameFolder $game) "game.cfg"
+  $companions = @()
+  foreach ($line in Get-Content -LiteralPath $configPath) {
+    if ($line -match '^\s*companion\s*=\s*(.+?)\s*$') {
+      $companion = $Matches[1]
+      if ($companion -notmatch '^[^\\/:|]+\.exe$') {
+        throw "$configPath`: companion must be an .exe file name beside the executable, not $companion"
+      }
+      $companions += $companion
+    }
+  }
+  return $companions
+}
+
+function Get-GameLauncher {
+  # A launcher the game's Steam entry starts, which launcher-skip (msimg32.dll) replaces with the game; none when unset.
+  param([string]$game)
+  $configPath = Join-Path (Get-GameFolder $game) "game.cfg"
+  $launchers = @()
+  foreach ($line in Get-Content -LiteralPath $configPath) {
+    if ($line -match '^\s*launcher\s*=\s*(.+?)\s*$') {
+      $launcher = $Matches[1]
+      if ($launcher -notmatch '^[^\\/:|]+\.exe$') {
+        throw "$configPath`: launcher must be an .exe file name beside the executable, not $launcher"
+      }
+      $launchers += $launcher
+    }
+  }
+  if ($launchers.Count -gt 1) {
+    throw "$configPath sets launcher more than once"
+  }
+  return $launchers
+}
+
+function Get-GameProxies {
+  # The DLLs that go beside the game's executable: version.dll, and msimg32.dll for a game with a launcher.
+  param([string]$game)
+  $proxies = @("version.dll")
+  if (@(Get-GameLauncher $game).Count -eq 1) {
+    $proxies += "msimg32.dll"
+  }
+  return $proxies
+}
+
+function Get-GameArchitecture {
+  param([string]$game)
+  $architecture = Get-GameSetting $game "architecture"
+  if (@("x64", "x86") -notcontains $architecture) {
+    throw "games\$game\game.cfg: architecture must be x64 or x86, not $architecture"
+  }
+  return $architecture
+}
+
+function Get-DiagnosticPlugins {
+  return @("stability-guard.dll", "display-guard.dll")
+}
+
+function Get-ShippedPlugins {
+  # Every plugin the game's plugins.txt names, on or switched off with #: a player can turn any of them on.
+  param([string]$game)
+  $listPath = Join-Path (Get-GameFolder $game) "plugins.txt"
+  $plugins = @()
+  foreach ($line in Get-Content -LiteralPath $listPath) {
+    $name = $line.Trim().TrimStart("#").Trim()
+    if ($name -match '^[^\\/: ]+\.dll$') {
+      $plugins += $name
+    }
+  }
+  if ($plugins.Count -eq 0) {
+    throw "$listPath names no plugins"
+  }
+  return $plugins
+}
+
+function Copy-LayoutFile {
+  param([string]$sourcePath, [string]$destinationFolder)
+  if (-not (Test-Path -LiteralPath $sourcePath)) {
+    throw "$sourcePath is missing; run build.ps1 first"
+  }
+  if (-not (Test-Path -LiteralPath $destinationFolder)) {
+    New-Item -ItemType Directory -Path $destinationFolder -Force | Out-Null
+  }
+  Copy-Item -LiteralPath $sourcePath -Destination $destinationFolder -Force
+}
+
+function Copy-ReleaseFiles {
+  param([string]$game, [string]$clientFolder)
+  $binaryFolder = Join-Path (Join-Path (Join-Path $repositoryFolder "build") $game) "bin"
+  $plugins = Get-ShippedPlugins $game
+  $proxies = Get-GameProxies $game
+  foreach ($proxy in $proxies) {
+    Copy-LayoutFile (Join-Path $binaryFolder $proxy) $clientFolder
+  }
+  foreach ($plugin in $plugins) {
+    Copy-LayoutFile (Join-Path $binaryFolder $plugin) (Join-Path $clientFolder "ankh-plugins")
+  }
+  return "$($proxies -join ', '), plugins $($plugins -join ', ')"
+}
+
+function Get-ReleaseFingerprint {
+  # The SHA-256 of the release's files by name: the same files give the same fingerprint, whatever the zip's timestamps.
+  param([string]$game)
+  $binaryFolder = Join-Path (Join-Path (Join-Path $repositoryFolder "build") $game) "bin"
+  $lines = @()
+  foreach ($fileName in @(Get-GameProxies $game) + @(Get-ShippedPlugins $game)) {
+    $path = Join-Path $binaryFolder $fileName
+    if (-not (Test-Path -LiteralPath $path)) {
+      throw "$path is missing; run build.ps1 first"
+    }
+    $lines += $fileName + " " + (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+  }
+  $bytes = [System.Text.Encoding]::ASCII.GetBytes(($lines -join "`n"))
+  $hasher = New-Object System.Security.Cryptography.SHA256Managed
+  return ([System.BitConverter]::ToString($hasher.ComputeHash($bytes)) -replace "-", "").ToLowerInvariant()
+}
+
+function Add-DiagnosticPlugins {
+  param([string]$game, [string]$clientFolder)
+  $binaryFolder = Join-Path (Join-Path (Join-Path $repositoryFolder "build") $game) "bin"
+  $pluginsFolder = Join-Path $clientFolder "ankh-plugins"
+  $diagnosticPlugins = @(Get-DiagnosticPlugins)
+  foreach ($plugin in $diagnosticPlugins) {
+    Copy-LayoutFile (Join-Path $binaryFolder $plugin) $pluginsFolder
+  }
+  $listPath = Join-Path $pluginsFolder "plugins.txt"
+  $lines = @()
+  if (Test-Path -LiteralPath $listPath) {
+    $lines = @(Get-Content -LiteralPath $listPath)
+  }
+  $listed = @($lines | ForEach-Object { $_.Trim().TrimStart("#").Trim() })
+  $missing = @($diagnosticPlugins | Where-Object { $listed -notcontains $_ })
+  if ($missing.Count -gt 0) {
+    [System.IO.File]::WriteAllText($listPath, ((@($missing) + $lines) -join "`r`n"), [System.Text.Encoding]::ASCII)
+  }
+  return "diagnostic plugins $($diagnosticPlugins -join ', ')"
+}
+
+function Copy-PluginLayout {
+  param([string]$game, [string]$destination, [switch]$diagnostics)
+  $executablePath = Join-Path $destination (Get-GameExecutable $game)
+  if (-not (Test-Path -LiteralPath $executablePath)) {
+    throw "$destination has no $(Get-GameExecutable $game)"
+  }
+  $clientFolder = Split-Path $executablePath
+  $installed = Copy-ReleaseFiles $game $clientFolder
+  if ($diagnostics) {
+    $installed += ", " + (Add-DiagnosticPlugins $game $clientFolder)
+  }
+  return $installed
+}
