@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ankhPlugins"
+version = "0.1.0"
+description = "Drives games that run ankh-plugins from outside, for iterating on the plugins."
+requires-python = ">=3.14"
+dependencies = ["pillow==12.3.0"]
+
+[tool.setuptools.packages.find]
+where = ["python"]
+include = ["ankhPlugins"]
