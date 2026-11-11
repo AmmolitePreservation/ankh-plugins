@@ -67,7 +67,7 @@ Each build is for one game and its architecture (game.cfg), since the loader car
 
 Run it as `powershell -NoProfile -File build.ps1 ...` when calling from another PowerShell, which otherwise turns native stderr into errors. The build lands in `build\<game>\bin`, checked for the exports the loader and Windows look up. Every plugin under `plugins/` is built for every game; the game's `plugins.txt` names the ones its release ships.
 
-`-test` runs the Python client's tests and, for a fixture game, installs the build beside the game the build made and runs the loader's tests in it (`python/fixtureTests`): plugin loading, a call passed on to the system DLL, the command pipe, pump callbacks on the game's main thread, a game's handler in place of a plugin's, and reload. The fixture games are the only ones the tests start; a real game is checked by playing it.
+`-test` runs the Python client's tests and, for a fixture game, installs the build beside the game the build made and runs the loader's tests in it (`python/fixtureTests`): plugin loading, a call passed on to the system DLL, the command pipe, pump callbacks on the game's main thread, a game's handler in place of a plugin's, reload, a companion, and the check of the game's build. The fixture games are the only ones the tests start; a real game is checked by playing it.
 
 `-gameFolder` lays the build out in that install folder as a release does (`layout.ps1`): the loader DLL beside the executable and the rest in `ankh-plugins`. It copies no settings files: the plugins write and update their own (see Settings files). `-diagnostics` also installs `stability-guard` and `display-guard` and lists them in `plugins.txt`; the loader keeps a listed plugin the release does not ship as long as its DLL is in the folder. Removing the loader DLL from the install folder turns every plugin off.
 
@@ -84,6 +84,7 @@ A game is released only when its release files change. `release.ps1` builds ever
 - `loader=` the system DLL the game imports and the loader is built as: a name with an export list in `core/loader/proxies` (`version`, `opengl32`). It has to be a DLL Windows takes from the game's folder: one on Windows' known-DLLs list, or one already in the process before the game's imports are resolved, never comes from there.
 - `companion=` (any number) another program beside the executable that also gets the plugins, such as one the launcher runs before the game.
 - `launcher=` (at most one) the launcher the game's Steam entry starts, which `launcher-skip` replaces with the game.
+- `timeDateStamp=` (at most one) the build of the executable the game's handlers and addresses were written for: its timeDateStamp as the loader's log prints it at `sessionStart` (`0x` and eight hexadecimal digits in capitals). In any other build of the game the loader stops with a message before it loads a plugin; a companion is not checked. Without it the plugins load in any build.
 
 ### Settings files
 Each plugin carries its settings files, embedded at build time, the one copy of them: each plugin's `.cfg` from its folder (or the game's own copy in `games/<game>/`, which replaces it for that game), and the game's `plugins.txt` in the loader. A file missing from `ankh-plugins` is written with the shipped defaults when the game starts, so deleting one starts it over. An existing file is used as it is, and one from an earlier release is brought up to date by key: a setting it lacks is appended with its default and the comment above it in the shipped file (`settingAdded` in the plugin's log), and a key the plugin does not read, such as one a newer release dropped, or a line that is not key=value, is removed from the file and logged with its text (`settingRemoved`). `plugins.txt` is kept the same way: a plugin a newer release adds is inserted with its shipped state, after the plugin that precedes it in the release's list (`pluginAdded`), and a line naming a plugin the release does not ship and the folder does not hold is removed (`pluginRemoved`).
@@ -109,6 +110,8 @@ Report first, then fix: the diagnostic plugins record what the game does, and a 
 3. Build with `-diagnostics -gameFolder <install folder>`, reproduce the problem, and read `ankh-plugins\logs\display-guard` and `stability-guard` (see Iterating).
 4. Take the fix from `plugins/` when one is there; otherwise write it (see Writing a plugin).
 5. List the plugin in the game's `plugins.txt`, confirm the fix in play, and add the game to the Games table.
+
+A game whose handlers or plugins hold addresses or code bytes of its executable names that build in game.cfg (`timeDateStamp=`): the loader's log (`ankh-plugins\logs\loader`) prints the running executable's at `sessionStart`.
 
 ## Iterating
 `ankhPlugins.session` keeps one game open across commands. It takes the game from `--game`, the install folder from `--gameFolder` or the `ankhPluginsGameFolder` environment variable, and records the launched process in `ankh-plugins\session.txt`:

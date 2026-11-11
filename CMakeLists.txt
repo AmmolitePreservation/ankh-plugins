@@ -208,6 +208,10 @@ addCoreLibrary(loader ${gameLoader} "${coreDirectory}/loader"
   SETTINGS "${gameDirectory}/plugins.txt")
 target_include_directories(loader PRIVATE "${generatedDirectory}")
 target_compile_definitions(loader PRIVATE "ankhPluginsGameExecutables=\"${gameExecutables}\"")
+# Set only for a game whose game.cfg names the build of its executable, which the loader then requires.
+if(NOT "${gameTimeDateStamp}" STREQUAL "")
+  target_compile_definitions(loader PRIVATE "ankhPluginsGameTimeDateStamp=${gameTimeDateStamp}")
+endif()
 
 # addPluginFolders(<parentFolder>): every folder in it is a plugin named after the folder. One that needs more than
 # addPluginLibrary gives carries a plugin.cmake, which is included in its place and sees pluginName and pluginFolder.

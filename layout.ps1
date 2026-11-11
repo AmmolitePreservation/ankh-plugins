@@ -23,17 +23,28 @@ function Get-GameFolder {
   return $folder
 }
 
-function Get-GameSetting {
+function Get-GameConfigPath {
+  param([string]$game)
+  return Join-Path (Get-GameFolder $game) "game.cfg"
+}
+
+function Get-GameSettingValues {
+  # Every value game.cfg gives the key, in the file's order; callers wrap the call in @().
   param([string]$game, [string]$key)
-  $configPath = Join-Path (Get-GameFolder $game) "game.cfg"
   $values = @()
-  foreach ($line in Get-Content -LiteralPath $configPath) {
+  foreach ($line in Get-Content -LiteralPath (Get-GameConfigPath $game)) {
     if ($line -match ('^\s*' + $key + '\s*=\s*(.+?)\s*$')) {
       $values += $Matches[1]
     }
   }
+  return $values
+}
+
+function Get-GameSetting {
+  param([string]$game, [string]$key)
+  $values = @(Get-GameSettingValues $game $key)
   if ($values.Count -ne 1) {
-    throw "$configPath must set $key exactly once"
+    throw "$(Get-GameConfigPath $game) must set $key exactly once"
   }
   return $values[0]
 }
@@ -47,15 +58,10 @@ function Get-GameCompanions {
   # Programs beside the game's executable that also get the plugins, such as a launcher step the game cannot start
   # without: file names, any number of companion= lines.
   param([string]$game)
-  $configPath = Join-Path (Get-GameFolder $game) "game.cfg"
-  $companions = @()
-  foreach ($line in Get-Content -LiteralPath $configPath) {
-    if ($line -match '^\s*companion\s*=\s*(.+?)\s*$') {
-      $companion = $Matches[1]
-      if ($companion -notmatch '^[^\\/:|]+\.exe$') {
-        throw "$configPath`: companion must be an .exe file name beside the executable, not $companion"
-      }
-      $companions += $companion
+  $companions = @(Get-GameSettingValues $game "companion")
+  foreach ($companion in $companions) {
+    if ($companion -notmatch '^[^\\/:|]+\.exe$') {
+      throw "$(Get-GameConfigPath $game): companion must be an .exe file name beside the executable, not $companion"
     }
   }
   return $companions
@@ -64,21 +70,31 @@ function Get-GameCompanions {
 function Get-GameLauncher {
   # A launcher the game's Steam entry starts, which launcher-skip (msimg32.dll) replaces with the game; none when unset.
   param([string]$game)
-  $configPath = Join-Path (Get-GameFolder $game) "game.cfg"
-  $launchers = @()
-  foreach ($line in Get-Content -LiteralPath $configPath) {
-    if ($line -match '^\s*launcher\s*=\s*(.+?)\s*$') {
-      $launcher = $Matches[1]
-      if ($launcher -notmatch '^[^\\/:|]+\.exe$') {
-        throw "$configPath`: launcher must be an .exe file name beside the executable, not $launcher"
-      }
-      $launchers += $launcher
+  $launchers = @(Get-GameSettingValues $game "launcher")
+  foreach ($launcher in $launchers) {
+    if ($launcher -notmatch '^[^\\/:|]+\.exe$') {
+      throw "$(Get-GameConfigPath $game): launcher must be an .exe file name beside the executable, not $launcher"
     }
   }
   if ($launchers.Count -gt 1) {
-    throw "$configPath sets launcher more than once"
+    throw "$(Get-GameConfigPath $game) sets launcher more than once"
   }
   return $launchers
+}
+
+function Get-GameTimeDateStamp {
+  # The build of the executable the game's handlers were written for, which the loader checks; none when unset.
+  param([string]$game)
+  $stamps = @(Get-GameSettingValues $game "timeDateStamp")
+  if ($stamps.Count -gt 1) {
+    throw "$(Get-GameConfigPath $game) sets timeDateStamp more than once"
+  }
+  foreach ($stamp in $stamps) {
+    if ($stamp -cnotmatch '^0x[0-9A-F]{8}$') {
+      throw "$(Get-GameConfigPath $game): timeDateStamp must be 0x and eight hexadecimal digits in capitals, as the loader's log prints it, not $stamp"
+    }
+  }
+  return $stamps
 }
 
 function Get-LoaderProxyFolder {
