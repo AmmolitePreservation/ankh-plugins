@@ -4,8 +4,8 @@ Lays out a game's build\<game>\bin as it goes into that game's install folder, s
 same files.
 
 .DESCRIPTION
-games\<game>\game.cfg names the game's executable relative to its install folder: version.dll goes beside it, and
-the ankh-plugins folder beside it gets every plugin the game's plugins.txt names, all of which a newer build
+games\<game>\game.cfg names the game's executable relative to its install folder: the loader DLL (loader=) goes beside
+it, and the ankh-plugins folder beside it gets every plugin the game's plugins.txt names, all of which a newer build
 replaces. No settings files: each plugin carries its own and writes or updates them in the ankh-plugins folder when the
 game starts, so a player's settings are never replaced. The diagnostic plugins never ship; Copy-PluginLayout -diagnostics
 adds them to an install, and the loader keeps a listed plugin whose DLL the folder holds. game.cfg's architecture (x64
@@ -81,10 +81,26 @@ function Get-GameLauncher {
   return $launchers
 }
 
-function Get-GameProxies {
-  # The DLLs that go beside the game's executable: version.dll, and msimg32.dll for a game with a launcher.
+function Get-LoaderProxyFolder {
+  # <name>.txt lists the exports of the system DLL <name>.dll, which the loader can then be built as.
+  return Join-Path (Join-Path (Join-Path $repositoryFolder "core") "loader") "proxies"
+}
+
+function Get-GameLoader {
+  # The system DLL the game imports, which the loader is built as and loaded in place of.
   param([string]$game)
-  $proxies = @("version.dll")
+  $loader = Get-GameSetting $game "loader"
+  $known = @(Get-ChildItem -LiteralPath (Get-LoaderProxyFolder) -Filter "*.txt" | ForEach-Object { $_.BaseName })
+  if ($known -cnotcontains $loader) {
+    throw "games\$game\game.cfg: loader must be one of $(($known | Sort-Object) -join ', '), not $loader"
+  }
+  return $loader
+}
+
+function Get-GameProxies {
+  # The DLLs that go beside the game's executable: the loader, and msimg32.dll for a game with a launcher.
+  param([string]$game)
+  $proxies = @("$(Get-GameLoader $game).dll")
   if (@(Get-GameLauncher $game).Count -eq 1) {
     $proxies += "msimg32.dll"
   }

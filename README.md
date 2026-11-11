@@ -1,26 +1,26 @@
 # ankh-plugins
-Plugins for the [Ankh](https://github.com/AmmolitePreservation/ankh) launcher's Windows games, 64-bit and 32-bit: the loader, the source every plugin shares, and the plugins that need no knowledge of an online game. Each plugin is a standalone DLL with one job, loaded into the game by a `version.dll` proxy, with its settings and logs in an `ankh-plugins` folder beside the game's executable. The game's own files are never modified. No installer, no registry.
+Plugins for the [Ankh](https://github.com/AmmolitePreservation/ankh) launcher's Windows games, 64-bit and 32-bit: the loader, the source every plugin shares, and the plugins that need no knowledge of an online game. Each plugin is a standalone DLL with one job, loaded into the game by the loader, which stands in for a system DLL the game imports (`version.dll` for most), with its settings and logs in an `ankh-plugins` folder beside the game's executable. The game's own files are never modified. No installer, no registry.
 
 The plugin is the unit: it is written once, for every game, and a game takes it by naming it in its `plugins.txt`. Game code exists only where a game needs something no central plugin can do.
 
 ## Install
-A game's release is a zip to extract into the folder that holds the game's executable; it needs nothing else, Ankh included. Its notes say what it fixes and anything the game needs set. To remove it, delete `version.dll` (and `msimg32.dll`, for a game whose release has one) and the `ankh-plugins` folder from the game's folder. Each plugin writes its settings file into `ankh-plugins` the first time the game starts.
+A game's release is a zip to extract into the folder that holds the game's executable; it needs nothing else, Ankh included. Its notes say what it fixes and anything the game needs set. To remove it, delete the loader DLL its notes name (`version.dll` for most, and `msimg32.dll` for a game whose release has one) and the `ankh-plugins` folder from the game's folder. Each plugin writes its settings file into `ankh-plugins` the first time the game starts.
 
 Releases are listed at [releases](https://github.com/AmmolitePreservation/ankh-plugins/releases). Publishing is switched off (see Releases), so a game is installed from a build for now (see Build, test and install).
 
 ## Layout
 | Folder | What it holds |
 |---|---|
-| `core/loader/` | Builds `version.dll`, a proxy for the system copy. Windows picks it up from the executable's folder when the game or one of its DLLs imports `version.dll`. It acts only in the game's executable and its companions (game.cfg); in any other program in the folder it only passes calls on. On the main thread and before any game code runs, it brings `plugins.txt` up to the release's plugins (see Settings files), then loads each DLL named there from a shadow copy and calls its `Load` export: at the game's entry point when Windows loads it at startup, or, when a packed executable loads it while unpacking itself, at that thread's first `LoadLibrary`, `GetProcAddress` or C runtime startup call outside the loader lock (`startMode` in its log). While the game runs it answers one-line commands on `\\.\pipe\ankh-plugins-<process ID>`: `plugins`, `reload <dll>` for a plugin that exports `Unload`, and every command a plugin registers. Its own log is `logs\loader`. |
+| `core/loader/` | Builds the loader as the system DLL game.cfg's `loader=` names (`version.dll`, `opengl32.dll`): it has every export of the system copy, each passing its call on. `proxies/<name>.txt` lists a DLL's exports, and the build generates the export table and the stubs from it. Windows picks the loader up from the executable's folder when the game or one of its DLLs imports that DLL. It acts only in the game's executable and its companions (game.cfg); in any other program in the folder it only passes calls on. On the main thread and before any game code runs, it brings `plugins.txt` up to the release's plugins (see Settings files), then loads each DLL named there from a shadow copy and calls its `Load` export: at the game's entry point when Windows loads it at startup, or, when a packed executable loads it while unpacking itself, at that thread's first `LoadLibrary`, `GetProcAddress` or C runtime startup call outside the loader lock (`startMode` in its log). While the game runs it answers one-line commands on `\\.\pipe\ankh-plugins-<process ID>`: `plugins`, `reload <dll>` for a plugin that exports `Unload`, and every command a plugin registers. Its own log is `logs\loader`. |
 | `core/shared/` | Source every plugin compiles in: the host interface (`pluginHost.h`), session log, fatal error, hook registry and code patches, command pipe, settings files, and vendored MinHook. |
 | `core/plugin/` | Source every plugin compiles in and the loader does not: the `PluginInterfaceVersion` export. |
 | `core/tests/` | The loader's test fixture: a small game the build makes itself, and `echo`, a plugin whose commands exercise every way the loader answers one. |
 | `plugins/<name>/` | One plugin, built for every game. |
-| `games/<game>/` | One game: `game.cfg`, `plugins.txt` (the plugins its release ships), `release.md` (its release notes, starting with a `#` title), `<plugin>.cfg` for any plugin whose shipped settings differ for this game, and `plugins/<name>/` for plugins only this game needs. |
+| `games/<game>/` | One game: `game.cfg`, `plugins.txt` (the plugins its release ships), `release.md` (its release notes, starting with a `#` title), `<plugin>.cfg` for any plugin whose shipped settings differ for this game, `handlers/<plugin>/` for the handlers of a plugin this game replaces (see Writing a plugin), and `plugins/<name>/` for plugins only this game needs. |
 | `python/ankhPlugins/` | A game from outside: launches it without taking the foreground, talks to the loader's pipe, reads the plugins' session logs, and captures the game's window. |
 | `python/tests/`, `python/fixtureTests/` | The Python client's tests, and the tests that run the loader in the fixture game. |
 
-Code under `core/` and `plugins/` names no game. Plugin, game, DLL and settings file names are kebab-case; names inside the code are camelCase.
+Code under `core/` and `plugins/` names no game and includes nothing from `games/`, which the build checks. Plugin, game, DLL and settings file names are kebab-case; names inside the code are camelCase.
 
 ## Plugins
 | Plugin | What it does |
@@ -36,13 +36,13 @@ Code under `core/` and `plugins/` names no game. Plugin, game, DLL and settings 
 |---|---|---|
 | Jade Empire: Special Edition (Steam 7110, `JadeEmpire.exe` behind Steam's DRM wrapper, x86, Direct3D 9) | `games/jade-empire` | Fixed in the main menu and character creation; gameplay and combat not yet played. Its own plugins: `steam-locator` loads Steam's own `steam.dll` (the game looks for it only beside itself); `config-bypass`, with `launcher-skip`, skips the configuration utility and the launcher; `render-settings` writes the desktop mode, widescreen and `ClampFPS=0` into `JadeEmpire.ini`; `intro-hold` presents nothing before the first intro movie; `time-fixes` computes the engine clock in double precision (Direct3D 9's single precision x87 rounded it to steps of 65.5 ms after 6.4 days of uptime, so the world updated about 15 times a second) and puts physics (120 fixed steps a second), life textures, mesh scrolling and wind on game time. `d3d9-borderless` runs it borderless at the refresh rate. Each Steam launch still asks for administrator rights: Steam's install script sets that on every launch. |
 | SOMA (Steam 282140, `Soma.exe` 1.110, HPL3 on SDL2 and OpenGL) | `games/soma` | Fixed by `borderless-fit` (taller). The NVIDIA driver took the monitor over whenever SOMA's OpenGL window exactly covered it and was in front, switching an HDR monitor to SDR and back on each focus change, which blanked it for 2 to 3 seconds; the driver's OpenGL present method made no difference. Open: no sound in the background, since the game sleeps while out of focus (`SleepWhenOutOfFocus`). |
-| The loader's test fixture | `games/fixture-x64`, `games/fixture-x86` | Not a release: `fixtureGame.exe`, built here, with the `echo` plugin. `build.ps1 -test` runs the loader in it for each architecture. |
+| The loader's test fixture | `games/fixture-x64`, `games/fixture-x86`, `games/fixture-x86-opengl32` | Not a release: `fixtureGame.exe`, built here, with the `echo` plugin. `build.ps1 -test` runs the loader in it: as `version.dll` for each architecture, and as `opengl32.dll` on x86. `fixture-x64` replaces `echo`'s handler with its own. |
 
 ## Game folder layout
 ```
 <install folder>\
   <executable>            the game's executable, unmodified (game.cfg names it)
-  version.dll             the loader; must sit beside the executable
+  version.dll             the loader, named as game.cfg's loader= says; must sit beside the executable
   msimg32.dll             launcher-skip, for a game with a launcher
   ankh-plugins\
     plugins.txt           the plugins to load, in order
@@ -67,9 +67,9 @@ Each build is for one game and its architecture (game.cfg), since the loader car
 
 Run it as `powershell -NoProfile -File build.ps1 ...` when calling from another PowerShell, which otherwise turns native stderr into errors. The build lands in `build\<game>\bin`, checked for the exports the loader and Windows look up. Every plugin under `plugins/` is built for every game; the game's `plugins.txt` names the ones its release ships.
 
-`-test` runs the Python client's tests and, for a fixture game, installs the build beside the game the build made and runs the loader's tests in it (`python/fixtureTests`): plugin loading, the command pipe, pump callbacks on the game's main thread, and reload. The fixture games are the only ones the tests start; a real game is checked by playing it.
+`-test` runs the Python client's tests and, for a fixture game, installs the build beside the game the build made and runs the loader's tests in it (`python/fixtureTests`): plugin loading, a call passed on to the system DLL, the command pipe, pump callbacks on the game's main thread, a game's handler in place of a plugin's, and reload. The fixture games are the only ones the tests start; a real game is checked by playing it.
 
-`-gameFolder` lays the build out in that install folder as a release does (`layout.ps1`): `version.dll` beside the executable and the rest in `ankh-plugins`. It copies no settings files: the plugins write and update their own (see Settings files). `-diagnostics` also installs `stability-guard` and `display-guard` and lists them in `plugins.txt`; the loader keeps a listed plugin the release does not ship as long as its DLL is in the folder. Removing `version.dll` from the install folder turns every plugin off.
+`-gameFolder` lays the build out in that install folder as a release does (`layout.ps1`): the loader DLL beside the executable and the rest in `ankh-plugins`. It copies no settings files: the plugins write and update their own (see Settings files). `-diagnostics` also installs `stability-guard` and `display-guard` and lists them in `plugins.txt`; the loader keeps a listed plugin the release does not ship as long as its DLL is in the folder. Removing the loader DLL from the install folder turns every plugin off.
 
 `.\package.ps1 -game soma -outputPath <zip>` packs a built game's release: the same layout, without the diagnostic plugins.
 
@@ -79,8 +79,9 @@ A game is released only when its release files change. `release.ps1` builds ever
 `.github/workflows/release.yml` runs `release.ps1 -test` on each pull request to `main` and each push to `main`: every game is built, the tests run, and the games that would be released are reported. Nothing is published: the workflow does not pass `-publish`.
 
 ### game.cfg
-- `executable=` the game's executable, relative to its install folder; `version.dll` and `ankh-plugins` go beside it.
+- `executable=` the game's executable, relative to its install folder; the loader DLL and `ankh-plugins` go beside it.
 - `architecture=` `x64` or `x86`, which picks the build.
+- `loader=` the system DLL the game imports and the loader is built as: a name with an export list in `core/loader/proxies` (`version`, `opengl32`). It has to be a DLL Windows takes from the game's folder: one on Windows' known-DLLs list, or one already in the process before the game's imports are resolved, never comes from there.
 - `companion=` (any number) another program beside the executable that also gets the plugins, such as one the launcher runs before the game.
 - `launcher=` (at most one) the launcher the game's Steam entry starts, which `launcher-skip` replaces with the game.
 
@@ -89,6 +90,8 @@ Each plugin carries its settings files, embedded at build time, the one copy of 
 
 ## Writing a plugin
 A plugin is a folder holding `source/*.cpp` and its `<name>.cfg` settings files: under `plugins/` when any game could use it, under `games/<game>/plugins/` when only that game needs it. The build picks the folder up on its own and names the DLL after it. A plugin that needs more than that (a library to link, another output name) carries a `plugin.cmake`, which the build includes in place of its default, as `stability-guard` and `launcher-skip` do.
+
+A plugin's `handlers/*.cpp` are the parts of it a game may replace. Each defines functions that a header in the plugin's `source/` declares, with the behavior that fits any game. A game that needs its own puts a file of the same name in `games/<game>/handlers/<plugin>/`, and the build compiles that file in place of the plugin's, against the plugin's headers. A game file that matches no handler, or a folder there that names no plugin with handlers, stops the build. This is the only way game code gets into a central plugin: an include under `core/` or `plugins/` names a file beside it or in an include directory (no `..`, no folder in a quoted name), and none of their include directories is under `games/`; the build checks both each time it is configured.
 
 The DLL exports three functions (`core/shared/source/pluginHost.h`):
 
@@ -101,7 +104,7 @@ A plugin builds on `core/shared` for its session log, settings, fatal errors, ho
 ## Adding a game
 Report first, then fix: the diagnostic plugins record what the game does, and a fix is written against what their logs show.
 
-1. `games/<game>/game.cfg` (see game.cfg). The executable, or a DLL it loads, must load `version.dll`, at startup or while it unpacks itself.
+1. `games/<game>/game.cfg` (see game.cfg). The executable, or a DLL it loads, must load the DLL `loader=` names, at startup or while it unpacks itself. A DLL the loader has not stood in for before needs its export list in `core/loader/proxies` first: the names `dumpbin /exports` shows for the system copy, one per line.
 2. `games/<game>/plugins.txt` and `games/<game>/release.md`.
 3. Build with `-diagnostics -gameFolder <install folder>`, reproduce the problem, and read `ankh-plugins\logs\display-guard` and `stability-guard` (see Iterating).
 4. Take the fix from `plugins/` when one is there; otherwise write it (see Writing a plugin).

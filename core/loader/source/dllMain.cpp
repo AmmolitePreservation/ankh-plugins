@@ -8,7 +8,7 @@
 #include "sessionLog.h"
 #include "pluginHost.h"
 #include "pluginLoading.h"
-#include "versionProxy.h"
+#include "systemProxy.h"
 
 #include <windows.h>
 
@@ -21,8 +21,8 @@
 
 static const char* const pluginName = "loader";
 static const char* const loaderVersion = "0.1.0";
-// Everything but version.dll lives here: the plugin list, the plugins with their settings and every log.
-// version.dll itself has to sit beside the game's executable, the only place the game picks it up from.
+// Everything but the loader DLL lives here: the plugin list, the plugins with their settings and every log.
+// The loader DLL itself has to sit beside the game's executable, the only place the game picks it up from.
 static const char* const pluginsFolderName = "ankh-plugins";
 static const char* const commandPipeBaseName = "ankh-plugins";
 
@@ -81,8 +81,8 @@ static void runLoader() {
   writeLogLine("INFO", "loadComplete");
 }
 
-// Every program in the game's folder that imports version.dll loads this copy: only the game's executable and its
-// companions (game.cfg) get the plugins.
+// Every program in the game's folder that imports the DLL the loader stands in for loads this copy: only the game's
+// executable and its companions (game.cfg) get the plugins.
 static bool isGameExecutable() {
   char executablePath[MAX_PATH];
   const DWORD executablePathLength = GetModuleFileNameA(nullptr, executablePath, sizeof(executablePath));
@@ -108,7 +108,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved
     setFatalErrorTitle(pluginName);
     loaderModule = instance;
     DisableThreadLibraryCalls(instance);
-    loadSystemVersionLibrary();
+    loadSystemProxyLibrary();
     if (!isGameExecutable()) {
       return TRUE;
     }

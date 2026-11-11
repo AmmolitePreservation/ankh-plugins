@@ -3,8 +3,9 @@
   Builds ankh-plugins for one game: DLLs for its architecture (game.cfg) from Visual Studio's MSVC, CMake
   and Ninja.
 .DESCRIPTION
-  -game names a folder under games. Everything lands in build\<game>\bin: version.dll (the loader, carrying the
-  game's plugin list) and the plugin DLLs, which carry their settings files. -test runs the Python client's tests
+  -game names a folder under games. Everything lands in build\<game>\bin: the loader (carrying the game's plugin
+  list, named for the system DLL game.cfg's loader= has it stand in for) and the plugin DLLs, which carry their
+  settings files. -test runs the Python client's tests
   in the repository's .venv and, for a game that builds its own executable (a fixture), runs the loader and a test
   plugin in it. -buildCommit stamps the DLLs with that text in place of the checked-out commit. -gameFolder
   installs the build into the game's install folder as a release lays it out (layout.ps1), leaving the folder's
@@ -26,7 +27,8 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "layout.ps1")
 $buildDirectory = Join-Path (Join-Path $PSScriptRoot "build") $game
 $binaryDirectory = Join-Path $buildDirectory "bin"
-$requiredExports = @{ "version.dll" = @("GetFileVersionInfoA") }
+$loader = Get-GameLoader $game
+$requiredExports = @{ "$loader.dll" = @(Get-Content -LiteralPath (Join-Path (Get-LoaderProxyFolder) "$loader.txt")) }
 $launcher = @(Get-GameLauncher $game)
 if ($launcher.Count -eq 1) {
   $requiredExports["msimg32.dll"] = @("AlphaBlend")
@@ -94,12 +96,21 @@ function Invoke-NativeStep {
 }
 
 function Test-LibraryExport {
-  param([string]$fileName, [string]$exportName)
+  param([string]$fileName, [string[]]$exportNames)
   $path = Join-Path $binaryDirectory $fileName
-  $exportTable = & dumpbin.exe /nologo /exports $path
-  $pattern = "\s" + [regex]::Escape($exportName) + "(\s|$)"
-  if (-not ($exportTable | Where-Object { $_ -match $pattern })) {
-    throw "$fileName does not export $exportName"
+  $exported = New-Object System.Collections.Hashtable
+  foreach ($line in & dumpbin.exe /nologo /exports $path) {
+    if ($line -cmatch '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)') {
+      $exported[$Matches[1]] = $true
+    }
+  }
+  if ($LASTEXITCODE -ne 0) {
+    throw "dumpbin failed on $path (exit code $LASTEXITCODE)"
+  }
+  foreach ($exportName in $exportNames) {
+    if (-not $exported.ContainsKey($exportName)) {
+      throw "$fileName does not export $exportName"
+    }
   }
 }
 
@@ -114,15 +125,13 @@ if (-not $buildCommit) {
 }
 Write-BuildLog "Building commit $buildCommit for $game"
 Invoke-NativeStep "CMake configure" {
-  & cmake.exe -S $PSScriptRoot -B $buildDirectory -G Ninja -DCMAKE_BUILD_TYPE=Release "-DankhPluginsBuildCommit=$buildCommit" "-Dgame=$game" "-DgameArchitecture=$architecture" "-DgameExecutables=$((@(Split-Path -Leaf (Get-GameExecutable $game)) + @(Get-GameCompanions $game)) -join '|')" "-DgameLauncher=$($launcher -join '')"
+  & cmake.exe -S $PSScriptRoot -B $buildDirectory -G Ninja -DCMAKE_BUILD_TYPE=Release "-DankhPluginsBuildCommit=$buildCommit" "-Dgame=$game" "-DgameArchitecture=$architecture" "-DgameExecutables=$((@(Split-Path -Leaf (Get-GameExecutable $game)) + @(Get-GameCompanions $game)) -join '|')" "-DgameLauncher=$($launcher -join '')" "-DgameLoader=$loader"
 }
 Invoke-NativeStep "CMake build" { & cmake.exe --build $buildDirectory }
 foreach ($fileName in $requiredExports.Keys) {
-  foreach ($exportName in $requiredExports[$fileName]) {
-    Test-LibraryExport $fileName $exportName
-  }
+  Test-LibraryExport $fileName $requiredExports[$fileName]
   $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $binaryDirectory $fileName)).Hash.ToLowerInvariant()
-  Write-BuildLog "$fileName exports $($requiredExports[$fileName] -join ', ') (sha256 $hash)"
+  Write-BuildLog "$fileName has its $($requiredExports[$fileName].Count) required exports (sha256 $hash)"
 }
 
 if ($test) {

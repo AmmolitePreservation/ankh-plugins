@@ -6,7 +6,7 @@ import unittest
 
 from ankhPlugins import windowsApi
 from ankhPlugins.gameProcess import GameProcess, waitFor
-from ankhPlugins.games import Game
+from ankhPlugins.games import Game, gamesFolder
 from ankhPlugins.linePipe import LoaderSession, PipeCommandError
 from ankhPlugins.pluginLogs import sessionErrors, sessionLog
 from ankhPlugins.session import waitForLoader
@@ -15,7 +15,7 @@ pumpSeconds = 10
 exitSeconds = 10
 # The loader's commandReplyCapacity.
 commandReplyCapacity = 65536
-echoCommands = ["echo", "pumpCount", "quit", "fail", "twoLines", "long"]
+echoCommands = ["echo", "pumpCount", "quit", "fail", "twoLines", "long", "handler"]
 
 
 class LoaderTest(unittest.TestCase):
@@ -79,6 +79,11 @@ class LoaderTest(unittest.TestCase):
       with self.subTest(line=line):
         self.assertEqual(self.session.sendLine(line), "error " + message)
     self.assertEqual(self.session.command("echo", "after"), {"text": "after"})
+
+  def testAGamesHandlerFileReplacesThePluginsOwn(self):
+    gameHandler = gamesFolder / self.game.name / "handlers" / "echo" / "handlerName.cpp"
+    builtHandler = self.game.name if gameHandler.is_file() else "default"
+    self.assertEqual(self.session.command("handler"), {"name": builtHandler})
 
   def testReplyFillingTheWholeBufferArrivesComplete(self):
     prefix = "ok text="
