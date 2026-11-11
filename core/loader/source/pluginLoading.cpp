@@ -137,6 +137,8 @@ static const PluginEntry* findEntry(const std::vector<PluginEntry>& entries, con
 // file lacks, such as a plugin a newer release added, goes in with its shipped state after the nearest plugin listed
 // before it there, so the load order stays as shipped. A line naming a plugin the release does not ship and the folder
 // does not hold, such as one a newer release dropped, is removed and logged, and so is a line that names no plugin.
+// Each plugin is a package of its own, so a listed plugin whose DLL is not in the folder is simply not installed: it
+// keeps its line and is not loaded.
 static std::vector<std::string> readPluginList() {
   const std::string listPath = pluginDirectory + "\\" + pluginListFileName;
   writeDefaultFileIfMissing(listPath, pluginListFileName);
@@ -218,8 +220,13 @@ static std::vector<std::string> readPluginList() {
   std::vector<std::string> pluginNames;
   for (size_t index = 0; index < lines.size(); index++) {
     for (const PluginEntry& entry : entries) {
-      if (entry.lineIndex == index && entry.isOn) {
+      if (entry.lineIndex != index || !entry.isOn) {
+        continue;
+      }
+      if (isInPluginDirectory(entry.fileName)) {
         pluginNames.push_back(entry.fileName);
+      } else {
+        writeLogLine("INFO", "pluginNotInstalled plugin=%s", entry.fileName.c_str());
       }
     }
   }
