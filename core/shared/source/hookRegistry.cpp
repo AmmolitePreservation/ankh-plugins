@@ -259,3 +259,11 @@ void redirectCall(const char* patchName, void* callSite, void* expectedTarget, v
   memcpy(replacement + 1, &newOffset, 4);
   patchCode(patchName, callSite, expected, replacement, sizeof(expected));
 }
+
+void replacePushedValue(const char* patchName, void* pushSite, unsigned long expectedValue, unsigned long newValue) {
+  unsigned char expected[5] = { 0x68 };
+  unsigned char replacement[5] = { 0x68 };
+  memcpy(expected + 1, &expectedValue, 4);
+  memcpy(replacement + 1, &newValue, 4);
+  patchCode(patchName, pushSite, expected, replacement, sizeof(expected));
+}

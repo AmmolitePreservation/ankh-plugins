@@ -15,7 +15,7 @@
 
 // The plugin the loader's tests load into the fixture game: its commands exercise every way the loader answers a
 // plugin command, its pump callback shows which thread the loader runs callbacks on, and its one handler shows whether
-// the build took the game's file for it.
+// the build took the game's file for it, with that file's own source and settings files.
 
 static const char* const pluginName = "echo";
 static const char* const echoVersion = "0.1.0";
@@ -25,6 +25,7 @@ static DWORD gameMainThreadID = 0;
 static void (*removePumpCallback)(void (*callback)()) = nullptr;
 static volatile LONG pumpCount = 0;
 static volatile LONG lastPumpThreadID = 0;
+static const char* handlerGreeting = nullptr;
 
 static void countPump() {
   InterlockedIncrement(&pumpCount);
@@ -74,7 +75,7 @@ static int longCommand(const char*, char* reply, int replyCapacity) {
 }
 
 static int handlerCommand(const char*, char* reply, int replyCapacity) {
-  return formatReply(reply, replyCapacity, "ok name=%s", handlerName());
+  return formatReply(reply, replyCapacity, "ok name=%s greeting=%s", handlerName(), handlerGreeting);
 }
 
 extern "C" {
@@ -91,6 +92,7 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
     host->mainThreadID);
   gameMainThreadID = host->mainThreadID;
   removePumpCallback = host->removePumpCallback;
+  handlerGreeting = loadHandlerGreeting(host->pluginDirectory);
   host->registerCommand("echo", &echoCommand);
   host->registerCommand("pumpCount", &pumpCountCommand);
   host->registerCommand("quit", &quitCommand);

@@ -131,11 +131,15 @@ endfunction()
 # loads. core/plugin/source gives it the PluginInterfaceVersion export the loader checks before calling Load.
 # <pluginFolder>/handlers/<handler>.cpp is the part of the plugin a game may replace: when
 # games/<game>/handlers/<pluginName>/<handler>.cpp exists it is compiled in its place, against the plugin's headers.
+# A game that replaces a handler may give it more: the .cpp files of games/<game>/handlers/<pluginName>/source are
+# compiled with it, and games/<game>/handlers/<pluginName>/<pluginName>.<part>.cfg are settings files of its own.
 function(addPluginLibrary pluginName pluginFolder)
   cmake_parse_arguments(PARSE_ARGV 2 plugin "" "" "SOURCES;SETTINGS")
   set(gameHandlerFolder "${gameDirectory}/handlers/${pluginName}")
   file(GLOB defaultHandlers CONFIGURE_DEPENDS "${pluginFolder}/handlers/*.cpp")
   file(GLOB gameHandlers CONFIGURE_DEPENDS "${gameHandlerFolder}/*.cpp")
+  file(GLOB gameHandlerParts CONFIGURE_DEPENDS "${gameHandlerFolder}/source/*.cpp")
+  file(GLOB gameHandlerSettings CONFIGURE_DEPENDS "${gameHandlerFolder}/*.cfg")
   set(handlerNames "")
   set(handlerSources "")
   foreach(defaultHandler IN LISTS defaultHandlers)
@@ -153,9 +157,19 @@ function(addPluginLibrary pluginName pluginFolder)
       message(FATAL_ERROR "${gameHandler} replaces no handler: ${pluginFolder}/handlers has no ${handlerName}")
     endif()
   endforeach()
+  if(NOT gameHandlers AND (gameHandlerParts OR gameHandlerSettings))
+    message(FATAL_ERROR "${gameHandlerFolder} holds source or settings files and replaces no handler of ${pluginName}")
+  endif()
+  foreach(gameHandlerSetting IN LISTS gameHandlerSettings)
+    get_filename_component(settingsFileName "${gameHandlerSetting}" NAME)
+    string(FIND "${settingsFileName}" "${pluginName}." namePosition)
+    if(NOT namePosition EQUAL 0 OR settingsFileName STREQUAL "${pluginName}.cfg")
+      message(FATAL_ERROR "${gameHandlerSetting}: a handler's settings file is named ${pluginName}.<part>.cfg")
+    endif()
+  endforeach()
   addCoreLibrary(${pluginName} ${pluginName} "${pluginFolder}"
-    SOURCES ${pluginInterfaceSources} ${handlerSources} ${plugin_SOURCES}
-    SETTINGS ${plugin_SETTINGS})
+    SOURCES ${pluginInterfaceSources} ${handlerSources} ${gameHandlerParts} ${plugin_SOURCES}
+    SETTINGS ${gameHandlerSettings} ${plugin_SETTINGS})
   target_include_directories(${pluginName} PRIVATE "${pluginFolder}/source")
   set_property(GLOBAL APPEND PROPERTY pluginNames ${pluginName})
 endfunction()

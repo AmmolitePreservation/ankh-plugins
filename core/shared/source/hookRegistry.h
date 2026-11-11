@@ -35,3 +35,6 @@ void patchCode(const char* patchName, void* address, const unsigned char* expect
 
 // Points the 5-byte relative call at callSite to newTarget once it calls expectedTarget; fatal otherwise.
 void redirectCall(const char* patchName, void* callSite, void* expectedTarget, void* newTarget);
+
+// Makes the 5-byte push of a 32-bit value at pushSite push newValue once it pushes expectedValue; fatal otherwise.
+void replacePushedValue(const char* patchName, void* pushSite, unsigned long expectedValue, unsigned long newValue);

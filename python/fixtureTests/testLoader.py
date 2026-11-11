@@ -84,7 +84,17 @@ class LoaderTest(unittest.TestCase):
   def testAGamesHandlerFileReplacesThePluginsOwn(self):
     gameHandler = self.game.folder / "handlers" / "echo" / "handlerName.cpp"
     builtHandler = self.game.name if gameHandler.is_file() else "default"
-    self.assertEqual(self.session.command("handler"), {"name": builtHandler})
+    self.assertEqual(self.session.command("handler")["name"], builtHandler)
+
+  def testAGamesHandlerReadsItsOwnSettingsFileFromItsOwnSourceFile(self):
+    handlerSettings = self.game.folder / "handlers" / "echo" / "echo.handler.cfg"
+    writtenSettings = self.game.pluginsFolder / "echo.handler.cfg"
+    if handlerSettings.is_file():
+      self.assertEqual(self.session.command("handler")["greeting"], "fromTheHandlerSettings")
+      self.assertEqual(writtenSettings.read_bytes(), handlerSettings.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    else:
+      self.assertEqual(self.session.command("handler")["greeting"], "none")
+      self.assertFalse(writtenSettings.exists())
 
   def testReplyFillingTheWholeBufferArrivesComplete(self):
     prefix = "ok text="

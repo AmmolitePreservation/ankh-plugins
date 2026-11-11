@@ -3,6 +3,7 @@
 #include "exitGuard.h"
 #include "fatalError.h"
 #include "freezeWatchdog.h"
+#include "gameFixes.h"
 #include "hookRegistry.h"
 #include "memoryDumps.h"
 #include "processExit.h"
@@ -57,6 +58,7 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
   if (configuration.exitGuard) {
     installExitGuard(configuration, GetCurrentThreadId());
   }
+  installGameFixes(pluginDirectory, configuration);
   writeLogLine("INFO", "loadComplete");
   return 0;
 }
