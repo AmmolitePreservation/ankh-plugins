@@ -40,7 +40,7 @@ class Game:
       raise ValueError(f"{configPath}: timeDateStamp must be 0x and eight hexadecimal digits in capitals, not {stamps[0]!r}")
     self.architecture = settings["architecture"][0]
     self.name = name
-    self.installFolder = Path(installFolder)
+    self.installFolder = Path(installFolder).resolve()
     self.executablePath = self.installFolder / executables[0]
     self.executableName = self.executablePath.name
     self.companionPaths = [self.executablePath.parent / companion for companion in settings["companion"]]

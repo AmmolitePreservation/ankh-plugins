@@ -117,7 +117,8 @@ static POINT backBufferPoint(const Letterbox& letterbox, POINT client) {
   };
 }
 
-// The center of the back-buffer pixel, so mapping the result back gives the same pixel.
+// The center of the back-buffer pixel, so mapping the result back gives the same pixel while the picture is no
+// smaller than the back buffer.
 static POINT clientPoint(const Letterbox& letterbox, POINT backBuffer) {
   const RECT& picture = letterbox.picture;
   return {

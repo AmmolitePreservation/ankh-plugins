@@ -7,6 +7,11 @@ user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 windowMessageClose = 0x0010
+windowMessageMouseMove = 0x0200
+windowLongStyle = -16
+systemMetricScreenWidth = 0
+systemMetricScreenHeight = 1
+showMinimizedWithoutActivating = 7
 snapshotProcesses = 0x00000002
 invalidHandle = wintypes.HANDLE(-1).value
 enumWindowsProcedure = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -15,6 +20,9 @@ user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintyp
 user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
 user32.IsWindowVisible.argtypes = [wintypes.HWND]
+user32.IsIconic.argtypes = [wintypes.HWND]
+user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user32.GetForegroundWindow.restype = wintypes.HWND
 kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
@@ -49,23 +57,65 @@ def processIDsNamed(executableName):
     kernel32.CloseHandle(snapshot)
 
 
-def visibleWindows(processID):
-  """The process's visible top-level windows as (handle, title, (left, top, right, bottom))."""
+def topLevelWindows(processID):
+  """The handles of the process's top-level windows, hidden ones included."""
   found = []
 
   def visit(window, _):
     owner = wintypes.DWORD()
     user32.GetWindowThreadProcessId(window, ctypes.byref(owner))
-    if owner.value == processID and user32.IsWindowVisible(window):
-      title = ctypes.create_unicode_buffer(256)
-      user32.GetWindowTextW(window, title, len(title))
-      rectangle = wintypes.RECT()
-      user32.GetWindowRect(window, ctypes.byref(rectangle))
-      found.append((window, title.value, (rectangle.left, rectangle.top, rectangle.right, rectangle.bottom)))
+    if owner.value == processID:
+      found.append(window)
     return True
 
   user32.EnumWindows(enumWindowsProcedure(visit), 0)
   return found
+
+
+def windowTitle(window):
+  title = ctypes.create_unicode_buffer(256)
+  user32.GetWindowTextW(window, title, len(title))
+  return title.value
+
+
+def windowRectangle(window):
+  """(left, top, right, bottom) on the screen."""
+  rectangle = wintypes.RECT()
+  if not user32.GetWindowRect(window, ctypes.byref(rectangle)):
+    raiseLastError("GetWindowRect")
+  return (rectangle.left, rectangle.top, rectangle.right, rectangle.bottom)
+
+
+def visibleWindows(processID):
+  """The process's visible top-level windows as (handle, title, (left, top, right, bottom))."""
+  return [(window, windowTitle(window), windowRectangle(window)) for window in topLevelWindows(processID)
+    if user32.IsWindowVisible(window)]
+
+
+def windowStyle(window):
+  return user32.GetWindowLongW(window, windowLongStyle) & 0xFFFFFFFF
+
+
+def isVisible(window):
+  return bool(user32.IsWindowVisible(window))
+
+
+def isMinimized(window):
+  return bool(user32.IsIconic(window))
+
+
+def showWindow(window, command):
+  user32.ShowWindow(window, command)
+
+
+def postMouseMove(window, x, y):
+  """Posts a mouse move at a client position, as the system does when the cursor moves over the window."""
+  if not user32.PostMessageW(window, windowMessageMouseMove, 0, (y & 0xFFFF) << 16 | (x & 0xFFFF)):
+    raiseLastError("PostMessageW")
+
+
+def primaryMonitorSize():
+  return (user32.GetSystemMetrics(systemMetricScreenWidth), user32.GetSystemMetrics(systemMetricScreenHeight))
 
 
 def foregroundProcessID():
