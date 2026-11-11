@@ -3,18 +3,22 @@
   Builds ankh-plugins for one game: DLLs for its architecture (game.cfg) from Visual Studio's MSVC, CMake
   and Ninja.
 .DESCRIPTION
-  -game names a folder under games. Everything lands in build\<game>\bin: the loader (carrying the game's plugin
-  list, named for the system DLL game.cfg's loader= has it stand in for) and the plugin DLLs, which carry their
-  settings files. -test runs the Python client's tests
-  in the repository's .venv and, for a game that builds its own executable (a fixture), runs the loader and a test
-  plugin in it. -buildCommit stamps the DLLs with that text in place of the checked-out commit. -gameFolder
-  installs the build into the game's install folder as a release lays it out (layout.ps1), leaving the folder's
-  settings files to the plugins; -diagnostics adds the diagnostic plugins to it.
+  -game names a folder under the root's games. The root is this repository, or with -root another folder that holds
+  games and, optionally, plugins of its own, which are built beside this repository's. Everything lands in the root's
+  build\<game>\bin: the loader (carrying the game's plugin list, named for the system DLL game.cfg's loader= has it
+  stand in for) and the plugin DLLs, which carry their settings files. -test runs the Python client's tests in the
+  repository's .venv and, for a game that builds its own executable (a fixture), runs the loader and a test plugin in
+  it. -buildCommit stamps the DLLs with that text in place of the root's checked-out commit. -gameFolder installs the
+  build into the game's install folder as a release lays it out (layout.ps1), leaving the folder's settings files to
+  the plugins; -diagnostics adds the diagnostic plugins to it.
 .EXAMPLE
   .\build.ps1 -game soma -test -diagnostics -gameFolder "<SOMA install folder>"
+.EXAMPLE
+  .\build.ps1 -root fixtureRoot -game fixture-x64 -test
 #>
 param(
   [Parameter(Mandatory = $true)][string]$game,
+  [string]$root,
   [switch]$test,
   [string]$gameFolder,
   [switch]$diagnostics,
@@ -24,9 +28,14 @@ if ($diagnostics -and -not $gameFolder) {
   throw "-diagnostics adds the diagnostic plugins to the -gameFolder install"
 }
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "layout.ps1")
-$buildDirectory = Join-Path (Join-Path $PSScriptRoot "build") $game
-$binaryDirectory = Join-Path $buildDirectory "bin"
+# Not a parameter default: run with powershell -File, $PSScriptRoot is still empty when the defaults are evaluated.
+if (-not $root) {
+  $root = $PSScriptRoot
+}
+$root = (Resolve-Path -LiteralPath $root).Path
+. (Join-Path $PSScriptRoot "layout.ps1") -rootFolder $root
+$buildDirectory = Get-GameBuildFolder $game
+$binaryDirectory = Get-GameBinaryFolder $game
 $loader = Get-GameLoader $game
 $requiredExports = @{ "$loader.dll" = @(Get-Content -LiteralPath (Join-Path (Get-LoaderProxyFolder) "$loader.txt")) }
 $launcher = @(Get-GameLauncher $game)
@@ -77,11 +86,11 @@ function Import-VisualStudioEnvironment {
 }
 
 function Get-BuildCommit {
-  $commit = & git -C $PSScriptRoot rev-parse --short HEAD
+  $commit = & git -C $root rev-parse --short HEAD
   if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse failed"
   }
-  $changes = & git -C $PSScriptRoot status --porcelain
+  $changes = & git -C $root status --porcelain
   if ($changes) {
     $commit = "$commit-dirty"
   }
@@ -126,7 +135,7 @@ if (-not $buildCommit) {
 }
 Write-BuildLog "Building commit $buildCommit for $game"
 Invoke-NativeStep "CMake configure" {
-  & cmake.exe -S $PSScriptRoot -B $buildDirectory -G Ninja -DCMAKE_BUILD_TYPE=Release "-DankhPluginsBuildCommit=$buildCommit" "-Dgame=$game" "-DgameArchitecture=$architecture" "-DgameExecutables=$((@(Split-Path -Leaf (Get-GameExecutable $game)) + @(Get-GameCompanions $game)) -join '|')" "-DgameLauncher=$($launcher -join '')" "-DgameLoader=$loader" "-DgameTimeDateStamp=$($timeDateStamp -join '')"
+  & cmake.exe -S $PSScriptRoot -B $buildDirectory -G Ninja -DCMAKE_BUILD_TYPE=Release "-DankhPluginsBuildCommit=$buildCommit" "-DrootDirectory=$root" "-Dgame=$game" "-DgameArchitecture=$architecture" "-DgameExecutables=$((@(Split-Path -Leaf (Get-GameExecutable $game)) + @(Get-GameCompanions $game)) -join '|')" "-DgameLauncher=$($launcher -join '')" "-DgameLoader=$loader" "-DgameTimeDateStamp=$($timeDateStamp -join '')"
 }
 Invoke-NativeStep "CMake build" { & cmake.exe --build $buildDirectory }
 foreach ($fileName in $requiredExports.Keys) {
@@ -153,6 +162,7 @@ if ($test) {
     New-Item -ItemType Directory -Path $fixtureFolder | Out-Null
     Copy-Item -LiteralPath $builtGame -Destination $fixtureFolder
     Write-BuildLog ("Fixture install: " + (Copy-PluginLayout $game $fixtureFolder -diagnostics))
+    $env:ankhPluginsFixtureRoot = $root
     $env:ankhPluginsFixtureGame = $game
     $env:ankhPluginsFixtureFolder = $fixtureFolder
     Invoke-NativeStep "Fixture tests" {

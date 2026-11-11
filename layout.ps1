@@ -4,23 +4,38 @@ Lays out a game's build\<game>\bin as it goes into that game's install folder, s
 same files.
 
 .DESCRIPTION
-games\<game>\game.cfg names the game's executable relative to its install folder: the loader DLL (loader=) goes beside
-it, and the ankh-plugins folder beside it gets every plugin the game's plugins.txt names, all of which a newer build
-replaces. No settings files: each plugin carries its own and writes or updates them in the ankh-plugins folder when the
-game starts, so a player's settings are never replaced. The diagnostic plugins never ship; Copy-PluginLayout -diagnostics
-adds them to an install, and the loader keeps a listed plugin whose DLL the folder holds. game.cfg's architecture (x64
-or x86) picks the build.
+-rootFolder is the folder whose games\<game> folders hold the games and whose build\<game> folders take their builds:
+this repository, or a root of its own (build.ps1 -root). games\<game>\game.cfg names the game's executable relative to
+its install folder: the loader DLL (loader=) goes beside it, and the ankh-plugins folder beside it gets every plugin the
+game's plugins.txt names, all of which a newer build replaces. No settings files: each plugin carries its own and writes
+or updates them in the ankh-plugins folder when the game starts, so a player's settings are never replaced. The
+diagnostic plugins never ship; Copy-PluginLayout -diagnostics adds them to an install, and the loader keeps a listed
+plugin whose DLL the folder holds. game.cfg's architecture (x64 or x86) picks the build.
 #>
+param([Parameter(Mandatory = $true)][string]$rootFolder)
 
 $repositoryFolder = $PSScriptRoot
+if (-not (Test-Path -LiteralPath (Join-Path $rootFolder "games") -PathType Container)) {
+  throw "$rootFolder has no games folder"
+}
 
 function Get-GameFolder {
   param([string]$game)
-  $folder = Join-Path (Join-Path $repositoryFolder "games") $game
+  $folder = Join-Path (Join-Path $rootFolder "games") $game
   if (-not (Test-Path -LiteralPath (Join-Path $folder "game.cfg"))) {
-    throw "games\$game\game.cfg does not exist"
+    throw "$folder\game.cfg does not exist"
   }
   return $folder
+}
+
+function Get-GameBuildFolder {
+  param([string]$game)
+  return Join-Path (Join-Path $rootFolder "build") $game
+}
+
+function Get-GameBinaryFolder {
+  param([string]$game)
+  return Join-Path (Get-GameBuildFolder $game) "bin"
 }
 
 function Get-GameConfigPath {
@@ -108,7 +123,7 @@ function Get-GameLoader {
   $loader = Get-GameSetting $game "loader"
   $known = @(Get-ChildItem -LiteralPath (Get-LoaderProxyFolder) -Filter "*.txt" | ForEach-Object { $_.BaseName })
   if ($known -cnotcontains $loader) {
-    throw "games\$game\game.cfg: loader must be one of $(($known | Sort-Object) -join ', '), not $loader"
+    throw "$(Get-GameConfigPath $game): loader must be one of $(($known | Sort-Object) -join ', '), not $loader"
   }
   return $loader
 }
@@ -127,7 +142,7 @@ function Get-GameArchitecture {
   param([string]$game)
   $architecture = Get-GameSetting $game "architecture"
   if (@("x64", "x86") -notcontains $architecture) {
-    throw "games\$game\game.cfg: architecture must be x64 or x86, not $architecture"
+    throw "$(Get-GameConfigPath $game): architecture must be x64 or x86, not $architecture"
   }
   return $architecture
 }
@@ -166,7 +181,7 @@ function Copy-LayoutFile {
 
 function Copy-ReleaseFiles {
   param([string]$game, [string]$clientFolder)
-  $binaryFolder = Join-Path (Join-Path (Join-Path $repositoryFolder "build") $game) "bin"
+  $binaryFolder = Get-GameBinaryFolder $game
   $plugins = Get-ShippedPlugins $game
   $proxies = Get-GameProxies $game
   foreach ($proxy in $proxies) {
@@ -181,7 +196,7 @@ function Copy-ReleaseFiles {
 function Get-ReleaseFingerprint {
   # The SHA-256 of the release's files by name: the same files give the same fingerprint, whatever the zip's timestamps.
   param([string]$game)
-  $binaryFolder = Join-Path (Join-Path (Join-Path $repositoryFolder "build") $game) "bin"
+  $binaryFolder = Get-GameBinaryFolder $game
   $lines = @()
   foreach ($fileName in @(Get-GameProxies $game) + @(Get-ShippedPlugins $game)) {
     $path = Join-Path $binaryFolder $fileName
@@ -197,7 +212,7 @@ function Get-ReleaseFingerprint {
 
 function Add-DiagnosticPlugins {
   param([string]$game, [string]$clientFolder)
-  $binaryFolder = Join-Path (Join-Path (Join-Path $repositoryFolder "build") $game) "bin"
+  $binaryFolder = Get-GameBinaryFolder $game
   $pluginsFolder = Join-Path $clientFolder "ankh-plugins"
   $diagnosticPlugins = @(Get-DiagnosticPlugins)
   foreach ($plugin in $diagnosticPlugins) {

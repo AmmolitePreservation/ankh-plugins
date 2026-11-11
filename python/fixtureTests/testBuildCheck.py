@@ -27,12 +27,13 @@ def setTimeDateStamp(executablePath, timeDateStamp):
 class BuildCheckTest(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    installed = Game(os.environ["ankhPluginsFixtureGame"], os.environ["ankhPluginsFixtureFolder"])
+    installed = Game(os.environ["ankhPluginsFixtureRoot"], os.environ["ankhPluginsFixtureGame"],
+      os.environ["ankhPluginsFixtureFolder"])
     otherBuildFolder = installed.installFolder.with_name(otherBuildFolderName)
     if otherBuildFolder.exists():
       shutil.rmtree(otherBuildFolder)
     shutil.copytree(installed.installFolder, otherBuildFolder, ignore=shutil.ignore_patterns("logs"))
-    cls.game = Game(installed.name, otherBuildFolder)
+    cls.game = Game(installed.root, installed.name, otherBuildFolder)
     setTimeDateStamp(cls.game.executablePath, otherTimeDateStamp)
 
   def start(self, executablePath):

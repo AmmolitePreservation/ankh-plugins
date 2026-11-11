@@ -1,12 +1,12 @@
-"""Runs the loader and the echo plugin in the fixture game that build.ps1 -test installs. The build names the game and
-its install folder in the ankhPluginsFixtureGame and ankhPluginsFixtureFolder environment variables. Every test starts
-its own game."""
+"""Runs the loader and the echo plugin in the fixture game that build.ps1 -test installs. The build names the game's
+root, the game and its install folder in the ankhPluginsFixtureRoot, ankhPluginsFixtureGame and
+ankhPluginsFixtureFolder environment variables. Every test starts its own game."""
 import os
 import unittest
 
 from ankhPlugins import windowsApi
 from ankhPlugins.gameProcess import GameProcess, waitFor
-from ankhPlugins.games import Game, gamesFolder
+from ankhPlugins.games import Game
 from ankhPlugins.linePipe import LoaderSession, PipeCommandError
 from ankhPlugins.pluginLogs import sessionErrors, sessionLog
 from ankhPlugins.session import waitForLoader
@@ -20,7 +20,8 @@ echoCommands = ["echo", "pumpCount", "quit", "fail", "twoLines", "long", "handle
 
 class LoaderTest(unittest.TestCase):
   def setUp(self):
-    self.game = Game(os.environ["ankhPluginsFixtureGame"], os.environ["ankhPluginsFixtureFolder"])
+    self.game = Game(os.environ["ankhPluginsFixtureRoot"], os.environ["ankhPluginsFixtureGame"],
+      os.environ["ankhPluginsFixtureFolder"])
     self.process = GameProcess.launch(self.game, [])
     self.addCleanup(self.process.terminate, exitSeconds)
     waitForLoader(self.process)
@@ -81,7 +82,7 @@ class LoaderTest(unittest.TestCase):
     self.assertEqual(self.session.command("echo", "after"), {"text": "after"})
 
   def testAGamesHandlerFileReplacesThePluginsOwn(self):
-    gameHandler = gamesFolder / self.game.name / "handlers" / "echo" / "handlerName.cpp"
+    gameHandler = self.game.folder / "handlers" / "echo" / "handlerName.cpp"
     builtHandler = self.game.name if gameHandler.is_file() else "default"
     self.assertEqual(self.session.command("handler"), {"name": builtHandler})
 

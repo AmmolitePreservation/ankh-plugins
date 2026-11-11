@@ -1,8 +1,9 @@
 """Keeps one game open across commands, for iterating on the plugins.
 
-  python -m ankhPlugins.session --game <name> [--gameFolder <folder>] <command> [arguments]
+  python -m ankhPlugins.session [--root <folder>] --game <name> [--gameFolder <folder>] <command> [arguments]
 
---game names a folder under games. The install folder comes from --gameFolder or the ankhPluginsGameFolder environment
+--game names a folder under the root's games; the root is this repository unless --root or the ankhPluginsRoot
+environment variable names another. The install folder comes from --gameFolder or the ankhPluginsGameFolder environment
 variable. Options go before the command: everything after it belongs to the command. launch records the process ID
 and start time in ankh-plugins\\session.txt beside the game's executable; the other commands act on that game.
   launch [game arguments...]   start the game's executable without taking the foreground; waits for the loader
@@ -19,7 +20,7 @@ import os
 import sys
 
 from ankhPlugins.gameProcess import GameError, GameProcess, waitFor
-from ankhPlugins.games import Game
+from ankhPlugins.games import Game, repositoryFolder
 from ankhPlugins.linePipe import LoaderSession
 from ankhPlugins.pluginLogs import sessionErrors, sessionLog
 from ankhPlugins.windowCapture import captureWindow
@@ -116,6 +117,7 @@ def capture(game, picturePath):
 
 def main():
   parser = argparse.ArgumentParser(prog="ankhPlugins.session", description=__doc__.split("\n")[0])
+  parser.add_argument("--root", default=os.environ.get("ankhPluginsRoot", str(repositoryFolder)))
   parser.add_argument("--game", required=True)
   parser.add_argument("--gameFolder", default=os.environ.get("ankhPluginsGameFolder"))
   parser.add_argument("command", choices=["launch", "status", "plugins", "reload", "log", "capture", "close", "kill"])
@@ -125,7 +127,7 @@ def main():
     parser.error("give --gameFolder or set ankhPluginsGameFolder")
   arguments = options.arguments
   try:
-    game = Game(options.game, options.gameFolder)
+    game = Game(options.root, options.game, options.gameFolder)
   except ValueError as error:
     parser.error(str(error))
   try:

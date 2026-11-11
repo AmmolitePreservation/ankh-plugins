@@ -41,7 +41,7 @@ static int callForwardedExport() {
 }
 
 #else
-#error "The build defines which system DLL the fixture game imports (core/tests/fixture.cmake)"
+#error "The build defines which system DLL the fixture game imports (fixture.cmake)"
 #endif
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {

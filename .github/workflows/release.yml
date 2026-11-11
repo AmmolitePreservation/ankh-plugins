@@ -1,5 +1,6 @@
-# Every game under games builds and runs its tests on each pull request to main and each push to main, and the games
-# whose release files changed are reported. Nothing is published: release.ps1 runs without -publish.
+# Every game under games and every fixture game under fixtureRoot builds and runs its tests on each pull request to main
+# and each push to main, and the games whose release files changed are reported. Nothing is published: release.ps1 runs
+# without -publish.
 name: release
 
 on:
@@ -11,6 +12,7 @@ on:
       - core/**
       - plugins/**
       - games/**
+      - fixtureRoot/**
       - python/**
       - cmake/**
       - CMakeLists.txt
