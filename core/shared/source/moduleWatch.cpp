@@ -46,8 +46,14 @@ static bool isNamed(const UNICODE_STRING* baseName, const char* moduleName) {
   return true;
 }
 
+// The callback hooks the module, and a module that is freed and loaded again comes back without the hooks: a game
+// may load a library only to see whether it is there. Pinned, it stays for the life of the process.
 static void runOnce(ModuleWatch* watch) {
   if (InterlockedExchange(&watch->hasRun, 1) == 0) {
+    HMODULE pinned = nullptr;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_PIN, watch->moduleName, &pinned)) {
+      fatalError("Could not keep %s loaded (error %lu)", watch->moduleName, GetLastError());
+    }
     watch->callback();
   }
 }

@@ -129,7 +129,12 @@ static bool requestDisplayMode(Request* request) {
 typedef IDirect3D9* (WINAPI* Direct3DCreate9Function)(UINT sdkVersion);
 typedef HRESULT (WINAPI* DirectInput8CreateFunction)(HINSTANCE, DWORD, REFIID, void**, IUnknown*);
 
+// A game may load a library to see whether it is there, free it, and load it again when it uses it.
 static FARPROC loadedExport(const char* libraryName, const char* exportName) {
+  const HMODULE probe = LoadLibraryA(libraryName);
+  if (probe == nullptr || !FreeLibrary(probe)) {
+    return nullptr;
+  }
   const HMODULE library = LoadLibraryA(libraryName);
   return library != nullptr ? GetProcAddress(library, exportName) : nullptr;
 }
