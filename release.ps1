@@ -8,7 +8,8 @@ code; a game with no release.md yet stops there. Otherwise it takes the release'
 whose newest release carries the same fingerprint in its notes is left alone. Otherwise it is built again stamped with
 the checked-out commit, packed by package.ps1 into releases\ankh-plugins-<game>.zip and, with -publish,
 released as <game>-<yyyy.MM.dd>-<commit> with its release.md as title and notes. -test runs the Python client's tests
-with each build. Without -publish it only reports which games would be released. gh must be logged in.
+with each build and, first, builds and tests the fixture games (fixtureRoot\games), which run the loader's own tests
+and are never released. Without -publish it only reports which games would be released. gh must be logged in.
 #>
 param(
   [switch]$test,
@@ -16,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "layout.ps1")
+. (Join-Path $PSScriptRoot "layout.ps1") -rootFolder $PSScriptRoot
 $repository = "AmmolitePreservation/ankh-plugins"
 $unversioned = "unversioned"
 $fingerprintPattern = '<!-- fingerprint ([0-9a-f]{64}) -->'
@@ -71,9 +72,10 @@ function Publish-Game {
   if (-not $publish) {
     return
   }
-  $notes = @(Get-Content -Encoding UTF8 -LiteralPath (Join-Path (Get-GameFolder $game) "release.md"))
+  $notesSourcePath = Join-Path (Get-GameFolder $game) "release.md"
+  $notes = @(Get-Content -Encoding UTF8 -LiteralPath $notesSourcePath)
   if ($notes[0] -notmatch '^# (.+)$') {
-    throw "games\$game\release.md must start with a # title"
+    throw "$notesSourcePath must start with a # title"
   }
   $stamp = (Get-Date).ToUniversalTime().ToString("yyyy.MM.dd")
   $title = "$($Matches[1]) $stamp ($commit)"
@@ -84,6 +86,13 @@ function Publish-Game {
   & gh release create "$game-$stamp-$commit" $zipPath -R $repository --target $fullCommit --title $title --notes-file $notesPath
   if ($LASTEXITCODE -ne 0) {
     throw "gh release create failed for $game"
+  }
+}
+
+if ($test) {
+  $fixtureRoot = Join-Path $PSScriptRoot "fixtureRoot"
+  foreach ($game in (Get-ChildItem -Directory -LiteralPath (Join-Path $fixtureRoot "games")).Name) {
+    Invoke-Script "build.ps1" @("-root", $fixtureRoot, "-game", $game, "-buildCommit", $unversioned, "-test")
   }
 }
 

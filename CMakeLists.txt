@@ -17,9 +17,15 @@ endif()
 if(NOT DEFINED game)
   message(FATAL_ERROR "game is not set (build.ps1 sets it from -game)")
 endif()
-set(gameDirectory "${CMAKE_SOURCE_DIR}/games/${game}")
+if(NOT DEFINED rootDirectory)
+  message(FATAL_ERROR "rootDirectory is not set (build.ps1 sets it from -root)")
+endif()
+# Real paths, so a root that is this repository under another spelling of its path is still this repository.
+file(REAL_PATH "${CMAKE_SOURCE_DIR}" repositoryDirectory)
+file(REAL_PATH "${rootDirectory}" rootDirectory)
+set(gameDirectory "${rootDirectory}/games/${game}")
 if(NOT EXISTS "${gameDirectory}/game.cfg")
-  message(FATAL_ERROR "games/${game}/game.cfg does not exist")
+  message(FATAL_ERROR "${gameDirectory}/game.cfg does not exist")
 endif()
 if(NOT DEFINED gameExecutables)
   message(FATAL_ERROR "gameExecutables is not set (build.ps1 sets it from game.cfg)")
@@ -51,7 +57,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${outputDirectory}")
 # it in the link directory.
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
-set(coreDirectory "${CMAKE_SOURCE_DIR}/core")
+set(coreDirectory "${repositoryDirectory}/core")
 set(minhookDirectory "${coreDirectory}/shared/vendor/minhook")
 add_library(minhook STATIC
   "${minhookDirectory}/src/buffer.c"
@@ -77,8 +83,8 @@ function(embedDefaultFiles targetName)
   endforeach()
   add_custom_command(OUTPUT "${outputPath}"
     COMMAND "${CMAKE_COMMAND}" "-DoutputPath=${outputPath}" "-DdefaultFileCount=${defaultFileCount}" ${fileArguments}
-      -P "${CMAKE_SOURCE_DIR}/cmake/embedDefaultFiles.cmake"
-    DEPENDS ${ARGN} "${CMAKE_SOURCE_DIR}/cmake/embedDefaultFiles.cmake"
+      -P "${repositoryDirectory}/cmake/embedDefaultFiles.cmake"
+    DEPENDS ${ARGN} "${repositoryDirectory}/cmake/embedDefaultFiles.cmake"
     VERBATIM)
   target_sources(${targetName} PRIVATE "${outputPath}")
 endfunction()
@@ -115,7 +121,7 @@ function(addCoreLibrary targetName outputName folder)
     endif()
   endforeach()
   embedDefaultFiles(${targetName} ${embeddedSettingsFiles} ${library_SETTINGS})
-  string(FIND "${folder}/" "${CMAKE_SOURCE_DIR}/games/" gamesFolderPosition)
+  string(FIND "${folder}/" "${rootDirectory}/games/" gamesFolderPosition)
   if(NOT gamesFolderPosition EQUAL 0)
     set_property(GLOBAL APPEND PROPERTY centralTargets ${targetName})
   endif()
@@ -160,7 +166,7 @@ endfunction()
 # are generated from it.
 set(proxyListFile "${coreDirectory}/loader/proxies/${gameLoader}.txt")
 if(NOT EXISTS "${proxyListFile}")
-  message(FATAL_ERROR "games/${game}/game.cfg: loader=${gameLoader}, but core/loader/proxies has no ${gameLoader}.txt")
+  message(FATAL_ERROR "${gameDirectory}/game.cfg: loader=${gameLoader}, but core/loader/proxies has no ${gameLoader}.txt")
 endif()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${proxyListFile}")
 file(STRINGS "${proxyListFile}" proxyExportNames)
@@ -229,9 +235,14 @@ function(addPluginFolders parentFolder)
   endforeach()
 endfunction()
 
-# Every central plugin is built for every game; a game's plugins.txt names the ones it loads. A game's own plugins
-# live in games/<game>/plugins/<plugin>, built the same way.
-addPluginFolders("${CMAKE_SOURCE_DIR}/plugins")
+# Every central plugin is built for every game; a game's plugins.txt names the ones it loads. The central plugins are
+# this repository's plugins/ and, for a root of its own (build.ps1 -root), that root's plugins/ as well. A game's own
+# plugins live in games/<game>/plugins/<plugin>, built the same way.
+set(centralPluginFolders "${repositoryDirectory}/plugins" "${rootDirectory}/plugins")
+list(REMOVE_DUPLICATES centralPluginFolders)
+foreach(centralPluginFolder IN LISTS centralPluginFolders)
+  addPluginFolders("${centralPluginFolder}")
+endforeach()
 addPluginFolders("${gameDirectory}/plugins")
 
 # What a game builds beyond plugins.
@@ -248,12 +259,15 @@ foreach(handlerFolder IN LISTS handlerFolders)
   endif()
 endforeach()
 
-# Code under core/ and plugins/ is central and cannot reach into games/: its quoted includes name a file beside it or
-# in an include directory, none climbs out of a folder, and no central target has an include directory under games/.
-file(GLOB_RECURSE centralSourceFiles
-  "${coreDirectory}/*.cpp" "${coreDirectory}/*.h" "${coreDirectory}/*.c" "${coreDirectory}/*.hpp"
-  "${CMAKE_SOURCE_DIR}/plugins/*.cpp" "${CMAKE_SOURCE_DIR}/plugins/*.h" "${CMAKE_SOURCE_DIR}/plugins/*.c"
-  "${CMAKE_SOURCE_DIR}/plugins/*.hpp")
+# Code under core/ and a plugins/ beside games/ is central and cannot reach into games/: its quoted includes name a
+# file beside it or in an include directory, none climbs out of a folder, and no central target has an include
+# directory under games/, this repository's or the root's.
+set(centralSourceFiles "")
+foreach(centralFolder IN ITEMS "${coreDirectory}" ${centralPluginFolders})
+  file(GLOB_RECURSE centralFolderFiles
+    "${centralFolder}/*.cpp" "${centralFolder}/*.h" "${centralFolder}/*.c" "${centralFolder}/*.hpp")
+  list(APPEND centralSourceFiles ${centralFolderFiles})
+endforeach()
 list(FILTER centralSourceFiles EXCLUDE REGEX "/vendor/")
 foreach(centralSourceFile IN LISTS centralSourceFiles)
   file(STRINGS "${centralSourceFile}" includeLines REGEX "^[ \t]*#[ \t]*include[ \t]*[<\"]")
@@ -269,10 +283,12 @@ foreach(centralTarget IN LISTS centralTargets)
   get_target_property(includeDirectories ${centralTarget} INCLUDE_DIRECTORIES)
   foreach(includeDirectory IN LISTS includeDirectories)
     cmake_path(SET normalizedDirectory NORMALIZE "${includeDirectory}")
-    string(FIND "${normalizedDirectory}/" "${CMAKE_SOURCE_DIR}/games/" gamesFolderPosition)
-    if(gamesFolderPosition EQUAL 0)
-      message(FATAL_ERROR "${centralTarget} is built from core/ or plugins/ and has an include directory under games/: "
-        "${includeDirectory}")
-    endif()
+    foreach(gamesFolder IN ITEMS "${repositoryDirectory}/games/" "${rootDirectory}/games/")
+      string(FIND "${normalizedDirectory}/" "${gamesFolder}" gamesFolderPosition)
+      if(gamesFolderPosition EQUAL 0)
+        message(FATAL_ERROR "${centralTarget} is built from core/ or plugins/ and has an include directory under "
+          "games/: ${includeDirectory}")
+      endif()
+    endforeach()
   endforeach()
 endforeach()

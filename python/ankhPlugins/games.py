@@ -1,19 +1,23 @@
-"""A game the repository has plugins for: games\\<name>\\game.cfg names its executable relative to its install folder,
+"""A game a root has plugins for: <root>\\games\\<name>\\game.cfg names its executable relative to its install folder,
 its architecture (x64 or x86), the system DLL its loader stands in for, the companions that also get the plugins and,
-for a game whose handlers need one build of the executable, that build's timeDateStamp."""
+for a game whose handlers need one build of the executable, that build's timeDateStamp. A root is this repository or
+another folder that holds games (build.ps1 -root)."""
 import re
 from pathlib import Path
 
-gamesFolder = Path(__file__).resolve().parents[2] / "games"
+repositoryFolder = Path(__file__).resolve().parents[2]
 pluginsFolderName = "ankh-plugins"
 
 
 class Game:
-  def __init__(self, name, installFolder):
-    configPath = gamesFolder / name / "game.cfg"
+  def __init__(self, root, name, installFolder):
+    self.root = Path(root)
+    self.folder = self.root / "games" / name
+    configPath = self.folder / "game.cfg"
     if not configPath.is_file():
+      gamesFolder = self.root / "games"
       known = sorted(path.parent.name for path in gamesFolder.glob("*/game.cfg"))
-      raise ValueError(f"no game named {name!r}; the games are {', '.join(known)}")
+      raise ValueError(f"no game named {name!r} in {gamesFolder}; the games are {', '.join(known)}")
     settings = {"executable": [], "architecture": [], "loader": [], "companion": [], "launcher": [], "timeDateStamp": []}
     for line in configPath.read_text(encoding="ascii").splitlines():
       line = line.strip()

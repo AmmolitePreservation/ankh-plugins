@@ -9,7 +9,7 @@ carries no settings files: each plugin writes its own with the shipped defaults 
 later release only adds the settings it introduces, so an update never resets a player's.
 
 .PARAMETER game
-A folder under games.
+A folder under this repository's games.
 
 .PARAMETER outputPath
 The zip to write. It must not exist yet.
@@ -20,7 +20,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "layout.ps1")
+. (Join-Path $PSScriptRoot "layout.ps1") -rootFolder $PSScriptRoot
 
 function Write-PackageLog {
   param([string]$message)
