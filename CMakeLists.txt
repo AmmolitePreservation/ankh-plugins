@@ -24,6 +24,9 @@ endif()
 if(NOT DEFINED gameExecutables)
   message(FATAL_ERROR "gameExecutables is not set (build.ps1 sets it from game.cfg)")
 endif()
+if(NOT DEFINED gameLoader)
+  message(FATAL_ERROR "gameLoader is not set (build.ps1 sets it from game.cfg)")
+endif()
 if(NOT DEFINED ankhPluginsBuildCommit)
   message(FATAL_ERROR "ankhPluginsBuildCommit is not set (build.ps1 sets it from git)")
 endif()
@@ -44,8 +47,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(outputDirectory "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${outputDirectory}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${outputDirectory}")
-# Import libraries go elsewhere: the loader's version.lib in the link directory would shadow
-# the Windows SDK's.
+# Import libraries go elsewhere: the loader's has the name of a Windows SDK one and would shadow
+# it in the link directory.
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
 set(coreDirectory "${CMAKE_SOURCE_DIR}/core")
@@ -112,26 +115,98 @@ function(addCoreLibrary targetName outputName folder)
     endif()
   endforeach()
   embedDefaultFiles(${targetName} ${embeddedSettingsFiles} ${library_SETTINGS})
+  string(FIND "${folder}/" "${CMAKE_SOURCE_DIR}/games/" gamesFolderPosition)
+  if(NOT gamesFolderPosition EQUAL 0)
+    set_property(GLOBAL APPEND PROPERTY centralTargets ${targetName})
+  endif()
 endfunction()
 
 # addPluginLibrary(<pluginName> <pluginFolder> [SOURCES ...] [SETTINGS ...]): <pluginName>.dll, a plugin the loader
 # loads. core/plugin/source gives it the PluginInterfaceVersion export the loader checks before calling Load.
+# <pluginFolder>/handlers/<handler>.cpp is the part of the plugin a game may replace: when
+# games/<game>/handlers/<pluginName>/<handler>.cpp exists it is compiled in its place, against the plugin's headers.
 function(addPluginLibrary pluginName pluginFolder)
   cmake_parse_arguments(PARSE_ARGV 2 plugin "" "" "SOURCES;SETTINGS")
+  set(gameHandlerFolder "${gameDirectory}/handlers/${pluginName}")
+  file(GLOB defaultHandlers CONFIGURE_DEPENDS "${pluginFolder}/handlers/*.cpp")
+  file(GLOB gameHandlers CONFIGURE_DEPENDS "${gameHandlerFolder}/*.cpp")
+  set(handlerNames "")
+  set(handlerSources "")
+  foreach(defaultHandler IN LISTS defaultHandlers)
+    get_filename_component(handlerName "${defaultHandler}" NAME)
+    list(APPEND handlerNames "${handlerName}")
+    if(EXISTS "${gameHandlerFolder}/${handlerName}")
+      list(APPEND handlerSources "${gameHandlerFolder}/${handlerName}")
+    else()
+      list(APPEND handlerSources "${defaultHandler}")
+    endif()
+  endforeach()
+  foreach(gameHandler IN LISTS gameHandlers)
+    get_filename_component(handlerName "${gameHandler}" NAME)
+    if(NOT handlerName IN_LIST handlerNames)
+      message(FATAL_ERROR "${gameHandler} replaces no handler: ${pluginFolder}/handlers has no ${handlerName}")
+    endif()
+  endforeach()
   addCoreLibrary(${pluginName} ${pluginName} "${pluginFolder}"
-    SOURCES ${pluginInterfaceSources} ${plugin_SOURCES}
+    SOURCES ${pluginInterfaceSources} ${handlerSources} ${plugin_SOURCES}
     SETTINGS ${plugin_SETTINGS})
+  target_include_directories(${pluginName} PRIVATE "${pluginFolder}/source")
+  set_property(GLOBAL APPEND PROPERTY pluginNames ${pluginName})
 endfunction()
 
-# The loader carries the game's plugin list, so each game gets its own build of it.
-# x64 has no inline assembly, so its version.dll stubs are versionStubs.asm; x86's are in versionProxy.cpp.
-set(versionStubs "")
-if(gameArchitecture STREQUAL "x64")
-  set(versionStubs "${coreDirectory}/loader/source/versionStubs.asm")
+# The loader carries the game's plugin list, so each game gets its own build of it, as the system DLL the game
+# imports (game.cfg loader=). core/loader/proxies/<loader>.txt names that DLL's exports, one per line; the export
+# table, the macro systemProxy.cpp expands and x64's stubs (it has no inline assembly; x86's are in systemProxy.cpp)
+# are generated from it.
+set(proxyListFile "${coreDirectory}/loader/proxies/${gameLoader}.txt")
+if(NOT EXISTS "${proxyListFile}")
+  message(FATAL_ERROR "games/${game}/game.cfg: loader=${gameLoader}, but core/loader/proxies has no ${gameLoader}.txt")
 endif()
-addCoreLibrary(loader version "${coreDirectory}/loader"
-  SOURCES "${coreDirectory}/loader/source/exports.def" ${versionStubs}
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${proxyListFile}")
+file(STRINGS "${proxyListFile}" proxyExportNames)
+list(LENGTH proxyExportNames proxyExportCount)
+if(proxyExportCount EQUAL 0)
+  message(FATAL_ERROR "${proxyListFile} names no export")
+endif()
+set(uniqueProxyExportNames ${proxyExportNames})
+list(REMOVE_DUPLICATES uniqueProxyExportNames)
+if(NOT "${uniqueProxyExportNames}" STREQUAL "${proxyExportNames}")
+  message(FATAL_ERROR "${proxyListFile} names an export twice")
+endif()
+set(proxyMacroLines "")
+set(proxyDefinitionLines "")
+set(proxyExternLines "")
+set(proxyStubLines "")
+foreach(proxyExportName IN LISTS proxyExportNames)
+  if(NOT proxyExportName MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+    message(FATAL_ERROR "${proxyListFile}: \"${proxyExportName}\" is not an export name")
+  endif()
+  list(APPEND proxyMacroLines "  X(${proxyExportName})")
+  list(APPEND proxyDefinitionLines "  ${proxyExportName}=proxy${proxyExportName}")
+  list(APPEND proxyExternLines "EXTERN real${proxyExportName}:QWORD")
+  list(APPEND proxyStubLines
+    "proxy${proxyExportName} PROC\n  jmp QWORD PTR [real${proxyExportName}]\nproxy${proxyExportName} ENDP")
+endforeach()
+list(JOIN proxyMacroLines " \\\n" proxyMacroBody)
+list(JOIN proxyDefinitionLines "\n" proxyDefinitionBody)
+list(JOIN proxyExternLines "\n" proxyExternBody)
+list(JOIN proxyStubLines "\n" proxyStubBody)
+set(generatedDirectory "${CMAKE_BINARY_DIR}/generated")
+file(CONFIGURE OUTPUT "${generatedDirectory}/proxyExports.h" @ONLY CONTENT
+  "#pragma once\n\n#define proxyLibraryName \"${gameLoader}.dll\"\n\n#define proxyExports(X) \\\n${proxyMacroBody}\n")
+file(CONFIGURE OUTPUT "${generatedDirectory}/proxyExports.def" @ONLY CONTENT
+  "LIBRARY ${gameLoader}.dll\nEXPORTS\n${proxyDefinitionBody}\n")
+set(proxyStubs "")
+if(gameArchitecture STREQUAL "x64")
+  set(proxyStubs "${generatedDirectory}/proxyStubs.asm")
+  # A single jump, so the caller's arguments and return address reach the real function untouched.
+  file(CONFIGURE OUTPUT "${proxyStubs}" @ONLY CONTENT
+    "OPTION CASEMAP:NONE\n${proxyExternBody}\n\n.CODE\n${proxyStubBody}\n\nEND\n")
+endif()
+addCoreLibrary(loader ${gameLoader} "${coreDirectory}/loader"
+  SOURCES "${generatedDirectory}/proxyExports.def" ${proxyStubs}
   SETTINGS "${gameDirectory}/plugins.txt")
+target_include_directories(loader PRIVATE "${generatedDirectory}")
 target_compile_definitions(loader PRIVATE "ankhPluginsGameExecutables=\"${gameExecutables}\"")
 
 # addPluginFolders(<parentFolder>): every folder in it is a plugin named after the folder. One that needs more than
@@ -159,3 +234,41 @@ addPluginFolders("${gameDirectory}/plugins")
 if(EXISTS "${gameDirectory}/game.cmake")
   include("${gameDirectory}/game.cmake")
 endif()
+
+get_property(pluginNames GLOBAL PROPERTY pluginNames)
+file(GLOB handlerFolders LIST_DIRECTORIES true "${gameDirectory}/handlers/*")
+foreach(handlerFolder IN LISTS handlerFolders)
+  get_filename_component(handlerFolderName "${handlerFolder}" NAME)
+  if(NOT handlerFolderName IN_LIST pluginNames)
+    message(FATAL_ERROR "${handlerFolder} names no plugin this game builds with handlers")
+  endif()
+endforeach()
+
+# Code under core/ and plugins/ is central and cannot reach into games/: its quoted includes name a file beside it or
+# in an include directory, none climbs out of a folder, and no central target has an include directory under games/.
+file(GLOB_RECURSE centralSourceFiles
+  "${coreDirectory}/*.cpp" "${coreDirectory}/*.h" "${coreDirectory}/*.c" "${coreDirectory}/*.hpp"
+  "${CMAKE_SOURCE_DIR}/plugins/*.cpp" "${CMAKE_SOURCE_DIR}/plugins/*.h" "${CMAKE_SOURCE_DIR}/plugins/*.c"
+  "${CMAKE_SOURCE_DIR}/plugins/*.hpp")
+list(FILTER centralSourceFiles EXCLUDE REGEX "/vendor/")
+foreach(centralSourceFile IN LISTS centralSourceFiles)
+  file(STRINGS "${centralSourceFile}" includeLines REGEX "^[ \t]*#[ \t]*include[ \t]*[<\"]")
+  foreach(includeLine IN LISTS includeLines)
+    if(includeLine MATCHES "include[ \t]*\"[^\"]*[/\\\\]" OR includeLine MATCHES "include[ \t]*[<\"][^>\"]*\\.\\.")
+      message(FATAL_ERROR "${centralSourceFile}: ${includeLine}: an include in core/ or plugins/ has no folder in a "
+        "quoted name and no .. in any name")
+    endif()
+  endforeach()
+endforeach()
+get_property(centralTargets GLOBAL PROPERTY centralTargets)
+foreach(centralTarget IN LISTS centralTargets)
+  get_target_property(includeDirectories ${centralTarget} INCLUDE_DIRECTORIES)
+  foreach(includeDirectory IN LISTS includeDirectories)
+    cmake_path(SET normalizedDirectory NORMALIZE "${includeDirectory}")
+    string(FIND "${normalizedDirectory}/" "${CMAKE_SOURCE_DIR}/games/" gamesFolderPosition)
+    if(gamesFolderPosition EQUAL 0)
+      message(FATAL_ERROR "${centralTarget} is built from core/ or plugins/ and has an include directory under games/: "
+        "${includeDirectory}")
+    endif()
+  endforeach()
+endforeach()

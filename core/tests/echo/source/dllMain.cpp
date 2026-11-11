@@ -1,4 +1,5 @@
 #include "fatalError.h"
+#include "handlerName.h"
 #include "pluginHost.h"
 #include "sessionLog.h"
 
@@ -13,7 +14,8 @@
 #endif
 
 // The plugin the loader's tests load into the fixture game: its commands exercise every way the loader answers a
-// plugin command, and its pump callback shows which thread the loader runs callbacks on.
+// plugin command, its pump callback shows which thread the loader runs callbacks on, and its one handler shows whether
+// the build took the game's file for it.
 
 static const char* const pluginName = "echo";
 static const char* const echoVersion = "0.1.0";
@@ -71,6 +73,10 @@ static int longCommand(const char*, char* reply, int replyCapacity) {
   return replyCapacity;
 }
 
+static int handlerCommand(const char*, char* reply, int replyCapacity) {
+  return formatReply(reply, replyCapacity, "ok name=%s", handlerName());
+}
+
 extern "C" {
 
 // The loader calls this on the game's main thread at game start, and on its control-pipe thread for a reload.
@@ -91,6 +97,7 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
   host->registerCommand("fail", &failCommand);
   host->registerCommand("twoLines", &twoLinesCommand);
   host->registerCommand("long", &longCommand);
+  host->registerCommand("handler", &handlerCommand);
   host->addPumpCallback(&countPump);
   writeLogLine("INFO", "loadComplete");
   return 0;

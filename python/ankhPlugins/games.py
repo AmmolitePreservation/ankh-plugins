@@ -1,5 +1,5 @@
-"""A game the repository has plugins for: games\\<name>\\game.cfg names its executable relative to its install folder and
-its architecture (x64 or x86)."""
+"""A game the repository has plugins for: games\\<name>\\game.cfg names its executable relative to its install folder,
+its architecture (x64 or x86) and the system DLL its loader stands in for."""
 from pathlib import Path
 
 gamesFolder = Path(__file__).resolve().parents[2] / "games"
@@ -12,7 +12,7 @@ class Game:
     if not configPath.is_file():
       known = sorted(path.parent.name for path in gamesFolder.glob("*/game.cfg"))
       raise ValueError(f"no game named {name!r}; the games are {', '.join(known)}")
-    settings = {"executable": [], "architecture": [], "companion": [], "launcher": []}
+    settings = {"executable": [], "architecture": [], "loader": [], "companion": [], "launcher": []}
     for line in configPath.read_text(encoding="ascii").splitlines():
       line = line.strip()
       if line and not line.startswith("#"):
@@ -20,7 +20,7 @@ class Game:
         if not separator or key.strip() not in settings:
           raise ValueError(f"{configPath}: unknown line {line!r}")
         settings[key.strip()].append(value.strip())
-    for key in ("executable", "architecture"):
+    for key in ("executable", "architecture", "loader"):
       values = settings[key]
       if len(values) != 1:
         raise ValueError(f"{configPath} must set {key} exactly once")
