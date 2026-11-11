@@ -148,7 +148,7 @@ function Get-GameArchitecture {
 }
 
 function Get-DiagnosticPlugins {
-  return @("stability-guard.dll", "display-guard.dll")
+  return @("stability-guard.dll", "display-report.dll")
 }
 
 function Get-ShippedPlugins {

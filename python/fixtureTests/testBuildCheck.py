@@ -14,7 +14,7 @@ loaderSeconds = 30
 exitSeconds = 10
 otherBuildFolderName = "fixtureInstallOtherBuild"
 otherTimeDateStamp = 0x5A5A5A5A
-loadedPluginLogs = ["display-guard", "echo", "loader", "stability-guard"]
+loadedPluginLogs = ["display-guard", "display-report", "echo", "frame-control", "loader", "stability-guard"]
 
 
 def setTimeDateStamp(executablePath, timeDateStamp):
