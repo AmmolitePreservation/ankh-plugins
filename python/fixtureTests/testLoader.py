@@ -45,10 +45,10 @@ class LoaderTest(unittest.TestCase):
     return sessionErrors(self.game.pluginsFolder, self.process.processID, self.process.startedAt)
 
   def testPluginsListsEveryLoadedPluginAndTheReloadableOnes(self):
-    self.assertEqual(self.session.plugins(), ({"stability-guard.dll": 1, "display-guard.dll": 1, "echo.dll": 1}, ["echo.dll"]))
+    self.assertEqual(self.session.plugins(), ({"stability-guard.dll": 1, "display-report.dll": 1, "echo.dll": 1}, ["echo.dll"]))
 
   def testEveryPluginLoadsOnceWithoutErrors(self):
-    for pluginName in ("loader", "stability-guard", "display-guard", "echo"):
+    for pluginName in ("loader", "stability-guard", "display-report", "echo"):
       with self.subTest(plugin=pluginName):
         self.assertEqual([line.event for line in self.log(pluginName)].count("loadComplete"), 1)
     self.assertEqual(self.errors(), [])
@@ -92,7 +92,7 @@ class LoaderTest(unittest.TestCase):
 
   def testReloadReplacesThePluginAndItsCommands(self):
     self.assertEqual(self.session.reload("echo.dll"), 2)
-    self.assertEqual(self.session.plugins(), ({"stability-guard.dll": 1, "display-guard.dll": 1, "echo.dll": 2}, ["echo.dll"]))
+    self.assertEqual(self.session.plugins(), ({"stability-guard.dll": 1, "display-report.dll": 1, "echo.dll": 2}, ["echo.dll"]))
     self.assertEqual(self.session.command("echo", "again"), {"text": "again"})
     waitFor(lambda: self.pumpCount() > 0, pumpSeconds, "a message pump in the reloaded plugin")
     loaderLines = self.log("loader")

@@ -1,11 +1,17 @@
+#include "direct3DMode.h"
+
 #include <windows.h>
 
+#include <cstdlib>
 #include <cstring>
 
-// A stand-in game for the loader's tests. It imports the system DLL the loader stands in for, so the loader beside it
-// starts with it, and pumps messages on its main thread until a plugin posts WM_QUIT.
+// A stand-in game for the tests. It imports the system DLL the loader stands in for, so the loader beside it
+// starts with it, and pumps messages on its main thread until a plugin posts WM_QUIT. Started with the arguments
+// "direct3D ..." it first acts as a Direct3D 9 game (direct3DMode.h).
 // Exit codes: the WM_QUIT's (0 from the test plugin); 2 the call the loader forwards could not be set up; 3 nothing
-// ended it within its lifetime; 4 the call the loader forwards failed; 5 the timer did not start; 6 GetMessage failed.
+// ended it within its lifetime; 4 the call the loader forwards failed; 5 the timer did not start; 6 GetMessage failed;
+// 7 the arguments name no mode; 8 the Direct3D mode's report could not be opened; 9 a step of the Direct3D mode
+// failed, which the report's last line names.
 
 static const DWORD lifetimeMilliseconds = 120000;
 
@@ -44,10 +50,19 @@ static int callForwardedExport() {
 #error "The build defines which system DLL the fixture game imports (fixture.cmake)"
 #endif
 
-int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
   const int forwardedCallFailure = callForwardedExport();
   if (forwardedCallFailure != 0) {
     return forwardedCallFailure;
+  }
+  if (__argc > 1) {
+    if (strcmp(__argv[1], "direct3D") != 0) {
+      return 7;
+    }
+    const int modeFailure = runDirect3DMode(instance, __argc - 2, __argv + 2);
+    if (modeFailure != 0) {
+      return modeFailure;
+    }
   }
   // Wakes GetMessage, so the lifetime is checked while nothing else posts a message.
   if (SetTimer(nullptr, 0, 50, nullptr) == 0) {

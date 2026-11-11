@@ -1,11 +1,13 @@
-#include "displayReport.h"
-#include "focusReport.h"
+#include "configuration.h"
+#include "direct3DHooks.h"
 #include "fatalError.h"
+#include "gameWindow.h"
 #include "hookRegistry.h"
-#include "monitorWatch.h"
+#include "inputHooks.h"
+#include "presentationPolicy.h"
 #include "sessionLog.h"
+#include "windowPlacement.h"
 #include "pluginHost.h"
-#include "windowReport.h"
 
 #include <windows.h>
 
@@ -22,8 +24,8 @@ static bool isLoaded = false;
 
 extern "C" {
 
-// The loader calls this on the game's main thread at its entry point, before any game code runs. The plugin
-// has no Unload, so it loads only at game start. Every failure is fatal.
+// The loader calls this on the game's main thread at its entry point, before any game code runs,
+// outside the loader lock. The plugin has no Unload, so it loads only at game start. Every failure is fatal.
 __declspec(dllexport) DWORD Load(const PluginHost* host) {
   if (isLoaded) {
     fatalError("Load was called twice");
@@ -31,14 +33,24 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
   isLoaded = true;
 
   setFatalErrorTitle(pluginName);
-  openSessionLog(host->pluginDirectory, pluginName, host->sessionStamp);
+  const std::string pluginDirectory = host->pluginDirectory;
+  openSessionLog(pluginDirectory, pluginName, host->sessionStamp);
   writeLogLine("INFO", "sessionStart version=%s buildCommit=%s mainThreadID=%lu", displayGuardVersion, ankhPluginsBuildCommit,
     GetCurrentThreadId());
+
+  const Configuration configuration = loadConfiguration(pluginDirectory);
+  writeLogLine("INFO", "configurationLoaded monitor=%s renderResolution=%s startMinimized=%s releaseInput=%s",
+    configuration.monitor.c_str(), configuration.renderResolution == RenderResolution::native ? "native" : "game",
+    configuration.startMinimized ? "true" : "false", configuration.releaseInput ? "true" : "false");
+  const RECT target = monitorRectangle(configuration.monitor);
+  writeLogLine("INFO", "monitorSelected monitor=%s left=%ld top=%ld width=%ld height=%ld", configuration.monitor.c_str(),
+    target.left, target.top, target.right - target.left, target.bottom - target.top);
+
   initializeHookRegistry();
-  writeDisplayReport();
-  installWindowReporting(host->mainThreadID);
-  installFocusReporting(host->mainThreadID);
-  startMonitorWatch();
+  initializePresentationPolicy(host);
+  installGameWindowHooks(configuration);
+  installDirect3DHooks(configuration);
+  installInputHooks(configuration);
   writeLogLine("INFO", "loadComplete");
   return 0;
 }
