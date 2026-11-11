@@ -40,20 +40,64 @@ static void requireDirectory(const std::string& path, const char* description) {
   }
 }
 
+enum class ExecutableRole { game, companion, other };
+
+// Every program in the game's folder that imports the DLL the loader stands in for loads this copy: only the game's
+// executable, the first name the build gives, and its companions (game.cfg) get the plugins.
+static ExecutableRole executableRole() {
+  char executablePath[MAX_PATH];
+  const DWORD executablePathLength = GetModuleFileNameA(nullptr, executablePath, sizeof(executablePath));
+  if (executablePathLength == 0 || executablePathLength >= sizeof(executablePath)) {
+    fatalError("Could not resolve the executable path (error %lu)", GetLastError());
+  }
+  const char* executableName = strrchr(executablePath, '\\');
+  executableName = executableName != nullptr ? executableName + 1 : executablePath;
+  const char* candidate = ankhPluginsGameExecutables;
+  ExecutableRole role = ExecutableRole::game;
+  while (*candidate != '\0') {
+    const char* separator = strchr(candidate, '|');
+    const size_t length = separator != nullptr ? static_cast<size_t>(separator - candidate) : strlen(candidate);
+    if (strlen(executableName) == length && _strnicmp(executableName, candidate, length) == 0) {
+      return role;
+    }
+    role = ExecutableRole::companion;
+    candidate += separator != nullptr ? length + 1 : length;
+  }
+  return ExecutableRole::other;
+}
+
+static const IMAGE_NT_HEADERS* executableHeaders() {
+  const BYTE* executableBase = reinterpret_cast<const BYTE*>(GetModuleHandleA(nullptr));
+  return reinterpret_cast<const IMAGE_NT_HEADERS*>(
+    executableBase + reinterpret_cast<const IMAGE_DOS_HEADER*>(executableBase)->e_lfanew);
+}
+
 static void logExecutable() {
   char executablePath[MAX_PATH];
   const DWORD executablePathLength = GetModuleFileNameA(nullptr, executablePath, sizeof(executablePath));
   if (executablePathLength == 0 || executablePathLength >= sizeof(executablePath)) {
     fatalError("Could not resolve the game executable path (error %lu)", GetLastError());
   }
-  const BYTE* executableBase = reinterpret_cast<const BYTE*>(GetModuleHandleA(nullptr));
-  const IMAGE_NT_HEADERS* headers = reinterpret_cast<const IMAGE_NT_HEADERS*>(
-    executableBase + reinterpret_cast<const IMAGE_DOS_HEADER*>(executableBase)->e_lfanew);
+  const IMAGE_NT_HEADERS* headers = executableHeaders();
   // Not the command line: a launcher may put a login ticket on it.
   writeLogLine("INFO", "sessionStart version=%s buildCommit=%s mainThreadID=%lu executable=%s timeDateStamp=0x%08lX "
     "sizeOfImage=0x%08lX imageBase=%p", loaderVersion, ankhPluginsBuildCommit, GetCurrentThreadId(), executablePath,
-    headers->FileHeader.TimeDateStamp, headers->OptionalHeader.SizeOfImage, static_cast<const void*>(executableBase));
+    headers->FileHeader.TimeDateStamp, headers->OptionalHeader.SizeOfImage,
+    static_cast<const void*>(GetModuleHandleA(nullptr)));
 }
+
+#ifdef ankhPluginsGameTimeDateStamp
+// A game's handlers hold addresses and code bytes of one build of its executable (game.cfg's timeDateStamp); in any
+// other build they would patch the wrong code. A companion is another program with a build of its own.
+static void requireGameBuild() {
+  const DWORD expected = ankhPluginsGameTimeDateStamp;
+  const DWORD found = executableHeaders()->FileHeader.TimeDateStamp;
+  if (executableRole() == ExecutableRole::game && found != expected) {
+    fatalError("This is not the build of the game these plugins were made for: the executable's timeDateStamp is "
+      "0x%08lX, not 0x%08lX", found, expected);
+  }
+}
+#endif
 
 // Runs on the main thread outside the loader lock: at the game's entry point, or after a late load at the unpacked
 // game's first startup call.
@@ -67,6 +111,9 @@ static void runLoader() {
     now.wMinute, now.wSecond);
   openSessionLog(pluginsDirectory, pluginName, sessionStamp);
   logExecutable();
+#ifdef ankhPluginsGameTimeDateStamp
+  requireGameBuild();
+#endif
   if (isLateStart) {
     writeLogLine("INFO", "startMode mode=late trigger=%s", lateStartTrigger());
   } else {
@@ -81,35 +128,13 @@ static void runLoader() {
   writeLogLine("INFO", "loadComplete");
 }
 
-// Every program in the game's folder that imports the DLL the loader stands in for loads this copy: only the game's
-// executable and its companions (game.cfg) get the plugins.
-static bool isGameExecutable() {
-  char executablePath[MAX_PATH];
-  const DWORD executablePathLength = GetModuleFileNameA(nullptr, executablePath, sizeof(executablePath));
-  if (executablePathLength == 0 || executablePathLength >= sizeof(executablePath)) {
-    fatalError("Could not resolve the executable path (error %lu)", GetLastError());
-  }
-  const char* executableName = strrchr(executablePath, '\\');
-  executableName = executableName != nullptr ? executableName + 1 : executablePath;
-  const char* candidate = ankhPluginsGameExecutables;
-  while (*candidate != '\0') {
-    const char* separator = strchr(candidate, '|');
-    const size_t length = separator != nullptr ? static_cast<size_t>(separator - candidate) : strlen(candidate);
-    if (strlen(executableName) == length && _strnicmp(executableName, candidate, length) == 0) {
-      return true;
-    }
-    candidate += separator != nullptr ? length + 1 : length;
-  }
-  return false;
-}
-
 extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
   if (reason == DLL_PROCESS_ATTACH) {
     setFatalErrorTitle(pluginName);
     loaderModule = instance;
     DisableThreadLibraryCalls(instance);
     loadSystemProxyLibrary();
-    if (!isGameExecutable()) {
+    if (executableRole() == ExecutableRole::other) {
       return TRUE;
     }
     // A null reserved pointer means LoadLibrary at runtime: the entry point has already run, so the plugins start at the

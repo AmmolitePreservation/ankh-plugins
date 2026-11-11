@@ -34,6 +34,7 @@ if ($launcher.Count -eq 1) {
   $requiredExports["msimg32.dll"] = @("AlphaBlend")
 }
 $architecture = Get-GameArchitecture $game
+$timeDateStamp = @(Get-GameTimeDateStamp $game)
 foreach ($plugin in @(Get-ShippedPlugins $game) + @(Get-DiagnosticPlugins)) {
   $requiredExports[$plugin] = @("Load", "PluginInterfaceVersion")
 }
@@ -125,7 +126,7 @@ if (-not $buildCommit) {
 }
 Write-BuildLog "Building commit $buildCommit for $game"
 Invoke-NativeStep "CMake configure" {
-  & cmake.exe -S $PSScriptRoot -B $buildDirectory -G Ninja -DCMAKE_BUILD_TYPE=Release "-DankhPluginsBuildCommit=$buildCommit" "-Dgame=$game" "-DgameArchitecture=$architecture" "-DgameExecutables=$((@(Split-Path -Leaf (Get-GameExecutable $game)) + @(Get-GameCompanions $game)) -join '|')" "-DgameLauncher=$($launcher -join '')" "-DgameLoader=$loader"
+  & cmake.exe -S $PSScriptRoot -B $buildDirectory -G Ninja -DCMAKE_BUILD_TYPE=Release "-DankhPluginsBuildCommit=$buildCommit" "-Dgame=$game" "-DgameArchitecture=$architecture" "-DgameExecutables=$((@(Split-Path -Leaf (Get-GameExecutable $game)) + @(Get-GameCompanions $game)) -join '|')" "-DgameLauncher=$($launcher -join '')" "-DgameLoader=$loader" "-DgameTimeDateStamp=$($timeDateStamp -join '')"
 }
 Invoke-NativeStep "CMake build" { & cmake.exe --build $buildDirectory }
 foreach ($fileName in $requiredExports.Keys) {

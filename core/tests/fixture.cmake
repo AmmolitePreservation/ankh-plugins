@@ -10,4 +10,10 @@ else()
 endif()
 # The Windows SDK's import library: the executable imports the system DLL, as a game does.
 target_link_libraries(fixtureGame PRIVATE ${gameLoader})
+if(NOT "${gameTimeDateStamp}" STREQUAL "")
+  # /Brepro makes the linker's timeDateStamp a hash of the executable's content, while game.cfg names one build.
+  add_custom_command(TARGET fixtureGame POST_BUILD VERBATIM
+    COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${coreDirectory}/tests/setTimeDateStamp.ps1"
+      -path "$<TARGET_FILE:fixtureGame>" -timeDateStamp "${gameTimeDateStamp}")
+endif()
 addPluginLibrary(echo "${coreDirectory}/tests/echo")
