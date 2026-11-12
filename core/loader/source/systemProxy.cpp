@@ -33,6 +33,10 @@ proxyExports(declarePointer)
 proxyExports(declareStub)
 #endif
 
+const char* systemProxyLibraryName() {
+  return proxyLibraryName;
+}
+
 void loadSystemProxyLibrary() {
   char systemDirectory[MAX_PATH];
   const UINT systemDirectoryLength = GetSystemDirectoryA(systemDirectory, sizeof(systemDirectory));

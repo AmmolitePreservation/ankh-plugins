@@ -2,6 +2,7 @@
 
 #include "defaultFiles.h"
 #include "fatalError.h"
+#include "gameDefinition.h"
 #include "sessionLog.h"
 #include "settingsFile.h"
 
@@ -133,18 +134,25 @@ static const PluginEntry* findEntry(const std::vector<PluginEntry>& entries, con
   return nullptr;
 }
 
-// The plugins to load, in list order. Every plugin the shipped list names stays in the file, on or switched off: one the
-// file lacks, such as a plugin a newer release added, goes in with its shipped state after the nearest plugin listed
-// before it there, so the load order stays as shipped. A line naming a plugin the release does not ship and the folder
-// does not hold, such as one a newer release dropped, is removed and logged, and so is a line that names no plugin.
-// Each plugin is a package of its own, so a listed plugin whose DLL is not in the folder is simply not installed: it
-// keeps its line and is not loaded.
+static std::string joinLines(const std::vector<std::string>& lines) {
+  std::string contents;
+  for (size_t index = 0; index < lines.size(); index++) {
+    contents += lines[index] + (index + 1 < lines.size() ? "\r\n" : "");
+  }
+  return contents;
+}
+
+// The plugins to load, in list order. The shipped list is the game's own (ankh-plugins\game\plugins.txt, from the
+// loader's package); the file a player edits starts as a copy of it. Every plugin the shipped list names stays in the
+// file, on or switched off: one the file lacks, such as a plugin a newer release added, goes in with its shipped state
+// after the nearest plugin listed before it there, so the load order stays as shipped. A line naming a plugin the
+// release does not ship and the folder does not hold, such as one a newer release dropped, is removed and logged, and
+// so is a line that names no plugin. Each plugin is a package of its own, so a listed plugin whose DLL is not in the
+// folder is simply not installed: it keeps its line and is not loaded.
 static std::vector<std::string> readPluginList() {
   const std::string listPath = pluginDirectory + "\\" + pluginListFileName;
-  writeDefaultFileIfMissing(listPath, pluginListFileName);
-
-  const DefaultFile& shippedList = findDefaultFile(pluginListFileName);
-  const std::vector<std::string> shippedLines = splitLines(std::string(shippedList.contents, shippedList.size));
+  const std::vector<std::string> shippedLines = splitLines(readGameDefinitionFile(pluginDirectory, pluginListFileName));
+  writeFileIfMissing(listPath, joinLines(shippedLines));
   std::vector<PluginEntry> shippedEntries;
   for (size_t index = 0; index < shippedLines.size(); index++) {
     PluginEntry entry;
@@ -210,11 +218,7 @@ static std::vector<std::string> readPluginList() {
     isChanged = true;
   }
   if (isChanged) {
-    std::string newContents;
-    for (size_t index = 0; index < lines.size(); index++) {
-      newContents += lines[index] + (index + 1 < lines.size() ? "\r\n" : "");
-    }
-    replaceFile(listPath, newContents);
+    replaceFile(listPath, joinLines(lines));
   }
 
   std::vector<std::string> pluginNames;

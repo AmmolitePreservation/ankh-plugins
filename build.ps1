@@ -4,9 +4,11 @@
   and Ninja.
 .DESCRIPTION
   -game names a folder under the root's games. The root is this repository, or with -root another folder that holds
-  games and, optionally, plugins of its own, which are built beside this repository's. Everything lands in the root's
-  build\<game>\bin: the loader (carrying the game's plugin list, named for the system DLL game.cfg's loader= has it
-  stand in for) and the plugin DLLs, which carry their settings files. -test runs the Python client's tests in the
+  games and, optionally, plugins of its own, which are built beside this repository's. The root's build\<architecture>
+  is one build for every game of that architecture, so what the games share is compiled once however many of them are
+  built; this game's files land in its games\<game>\bin: the loader (named for the system DLL game.cfg's loader= has
+  it stand in for), the plugin DLLs, which carry their settings files, and in game\ the game.cfg and plugins.txt the
+  loader reads in an install. -test runs the Python client's tests in the
   repository's .venv and, for a game that builds its own executable (a fixture), runs the loader and a test plugin in
   it. -buildCommit stamps the DLLs with that text in place of the root's checked-out commit. -gameFolder installs the
   build into the game's install folder as a release lays it out (layout.ps1), leaving the folder's settings files to
@@ -34,7 +36,8 @@ if (-not $root) {
 }
 $root = (Resolve-Path -LiteralPath $root).Path
 . (Join-Path $PSScriptRoot "layout.ps1") -rootFolder $root
-$buildDirectory = Get-GameBuildFolder $game
+$buildDirectory = Get-BuildFolder $game
+$gameBuildDirectory = Get-GameBuildFolder $game
 $binaryDirectory = Get-GameBinaryFolder $game
 $loader = Get-GameLoader $game
 $requiredExports = @{ "$loader.dll" = @(Get-Content -LiteralPath (Join-Path (Get-LoaderProxyFolder) "$loader.txt")) }
@@ -43,7 +46,9 @@ if ($launcher.Count -eq 1) {
   $requiredExports["msimg32.dll"] = @("AlphaBlend")
 }
 $architecture = Get-GameArchitecture $game
-$timeDateStamp = @(Get-GameTimeDateStamp $game)
+# Read here so that a game.cfg the build could not use stops it with the reason.
+Get-GameCompanions $game | Out-Null
+Get-GameTimeDateStamp $game | Out-Null
 foreach ($plugin in @(Get-ShippedPlugins $game) + @(Get-DiagnosticPlugins)) {
   $requiredExports[$plugin] = @("Load", "PluginInterfaceVersion")
 }
@@ -133,11 +138,12 @@ Import-VisualStudioEnvironment
 if (-not $buildCommit) {
   $buildCommit = Get-BuildCommit
 }
-Write-BuildLog "Building commit $buildCommit for $game"
+Write-BuildLog "Building commit $buildCommit for $game in the $architecture build"
+$diagnosticPluginNames = @(Get-DiagnosticPlugins | ForEach-Object { [System.IO.Path]::GetFileNameWithoutExtension($_) })
 Invoke-NativeStep "CMake configure" {
-  & cmake.exe -S $PSScriptRoot -B $buildDirectory -G Ninja -DCMAKE_BUILD_TYPE=Release "-DankhPluginsBuildCommit=$buildCommit" "-DrootDirectory=$root" "-Dgame=$game" "-DgameArchitecture=$architecture" "-DgameExecutables=$((@(Split-Path -Leaf (Get-GameExecutable $game)) + @(Get-GameCompanions $game)) -join '|')" "-DgameLauncher=$($launcher -join '')" "-DgameLoader=$loader" "-DgameTimeDateStamp=$($timeDateStamp -join '')"
+  & cmake.exe -S $PSScriptRoot -B $buildDirectory -G Ninja -DCMAKE_BUILD_TYPE=Release "-DankhPluginsBuildCommit=$buildCommit" "-DrootDirectory=$root" "-DbuildArchitecture=$architecture" "-DdiagnosticPlugins=$($diagnosticPluginNames -join ';')"
 }
-Invoke-NativeStep "CMake build" { & cmake.exe --build $buildDirectory }
+Invoke-NativeStep "CMake build" { & cmake.exe --build $buildDirectory --target $game }
 foreach ($fileName in $requiredExports.Keys) {
   Test-LibraryExport $fileName $requiredExports[$fileName]
   $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $binaryDirectory $fileName)).Hash.ToLowerInvariant()
@@ -155,12 +161,15 @@ if ($test) {
   $builtGame = Join-Path $binaryDirectory (Split-Path -Leaf (Get-GameExecutable $game))
   if (Test-Path -LiteralPath $builtGame) {
     # Only a fixture game builds its own executable: the loader and a test plugin are then run in it.
-    $fixtureFolder = Join-Path $buildDirectory "fixtureInstall"
+    $fixtureFolder = Join-Path $gameBuildDirectory "fixtureInstall"
     if (Test-Path -LiteralPath $fixtureFolder) {
       Remove-Item -LiteralPath $fixtureFolder -Recurse -Force
     }
     New-Item -ItemType Directory -Path $fixtureFolder | Out-Null
     Copy-Item -LiteralPath $builtGame -Destination $fixtureFolder
+    foreach ($builtLauncher in $launcher) {
+      Copy-Item -LiteralPath (Join-Path $binaryDirectory $builtLauncher) -Destination $fixtureFolder
+    }
     Write-BuildLog ("Fixture install: " + (Copy-PluginLayout $game $fixtureFolder -diagnostics))
     $env:ankhPluginsFixtureRoot = $root
     $env:ankhPluginsFixtureGame = $game

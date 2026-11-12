@@ -42,12 +42,11 @@ static const char* fileNameOf(const std::string& path) {
   return separator == std::string::npos ? path.c_str() : path.c_str() + separator + 1;
 }
 
-bool writeDefaultFileIfMissing(const std::string& path, const char* defaultFileName) {
+bool writeFileIfMissing(const std::string& path, const std::string& contents) {
   if (GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
     return false;
   }
-  const DefaultFile& defaultFile = findDefaultFile(defaultFileName);
-  const std::string stagedPath = writeStagedFile(path, defaultFile.contents, defaultFile.size);
+  const std::string stagedPath = writeStagedFile(path, contents.data(), contents.size());
   // Without MOVEFILE_REPLACE_EXISTING the move fails when another game created the file first, which keeps that one.
   if (!MoveFileExA(stagedPath.c_str(), path.c_str(), MOVEFILE_WRITE_THROUGH)) {
     const DWORD error = GetLastError();
@@ -59,6 +58,11 @@ bool writeDefaultFileIfMissing(const std::string& path, const char* defaultFileN
   }
   writeLogLine("INFO", "settingsFileCreated file=%s", fileNameOf(path));
   return true;
+}
+
+bool writeDefaultFileIfMissing(const std::string& path, const char* defaultFileName) {
+  const DefaultFile& defaultFile = findDefaultFile(defaultFileName);
+  return writeFileIfMissing(path, std::string(defaultFile.contents, defaultFile.size));
 }
 
 void replaceFile(const std::string& path, const std::string& contents) {

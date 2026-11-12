@@ -16,8 +16,11 @@ extern const size_t defaultFileCount;
 // The plugin's embedded copy of fileName. Fatal when the plugin ships no such file.
 const DefaultFile& findDefaultFile(const char* fileName);
 
-// Writes the embedded copy of defaultFileName to path unless a file is already there; a game starting at the same
-// moment never sees it half written. Returns true when it wrote the file.
+// Writes contents to path unless a file is already there; a game starting at the same moment never sees it half
+// written. Returns true when it wrote the file.
+bool writeFileIfMissing(const std::string& path, const std::string& contents);
+
+// writeFileIfMissing with the embedded copy of defaultFileName.
 bool writeDefaultFileIfMissing(const std::string& path, const char* defaultFileName);
 
 // Replaces the file at path with contents in one step, waiting a moment for another game reading it.

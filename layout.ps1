@@ -1,16 +1,18 @@
 <#
 .SYNOPSIS
-Lays out a game's build\<game>\bin as it goes into that game's install folder, so an install and a release hold the
-same files.
+Lays out a game's built files as they go into that game's install folder, so an install and a release hold the same
+files.
 
 .DESCRIPTION
--rootFolder is the folder whose games\<game> folders hold the games and whose build\<game> folders take their builds:
-this repository, or a root of its own (build.ps1 -root). games\<game>\game.cfg names the game's executable relative to
-its install folder: the loader DLL (loader=) goes beside it, and the ankh-plugins folder beside it gets every plugin the
-game's plugins.txt names, all of which a newer build replaces. No settings files: each plugin carries its own and writes
-or updates them in the ankh-plugins folder when the game starts, so a player's settings are never replaced. The
-diagnostic plugins never ship; Copy-PluginLayout -diagnostics adds them to an install, and the loader keeps a listed
-plugin whose DLL the folder holds. game.cfg's architecture (x64 or x86) picks the build.
+-rootFolder is the folder whose games\<game> folders hold the games and whose build folder takes their builds: this
+repository, or a root of its own (build.ps1 -root). A build is for an architecture (build\<architecture>, which
+game.cfg's architecture picks) and holds every game of it; a game's files are in its games\<game>\bin there.
+games\<game>\game.cfg names the game's executable relative to its install folder: the loader DLL (loader=) goes beside
+it, and the ankh-plugins folder beside it gets every plugin the game's plugins.txt names and, in its game folder, the
+game's game.cfg and plugins.txt, which tell the loader which game it is in; a newer build replaces all of them. No
+settings files: each plugin carries its own and writes or updates them in the ankh-plugins folder when the game starts,
+so a player's settings are never replaced. The diagnostic plugins never ship; Copy-PluginLayout -diagnostics adds them
+to an install, and the loader keeps a listed plugin whose DLL the folder holds.
 #>
 param([Parameter(Mandatory = $true)][string]$rootFolder)
 
@@ -28,9 +30,15 @@ function Get-GameFolder {
   return $folder
 }
 
+function Get-BuildFolder {
+  # The build tree of the game's architecture, which every game of that architecture in the root shares.
+  param([string]$game)
+  return Join-Path (Join-Path $rootFolder "build") (Get-GameArchitecture $game)
+}
+
 function Get-GameBuildFolder {
   param([string]$game)
-  return Join-Path (Join-Path $rootFolder "build") $game
+  return Join-Path (Join-Path (Get-BuildFolder $game) "games") $game
 }
 
 function Get-GameBinaryFolder {
@@ -113,12 +121,12 @@ function Get-GameTimeDateStamp {
 }
 
 function Get-LoaderProxyFolder {
-  # <name>.txt lists the exports of the system DLL <name>.dll, which the loader can then be built as.
+  # <name>.txt lists the exports of the system DLL <name>.dll, which the loader can then stand in for.
   return Join-Path (Join-Path (Join-Path $repositoryFolder "core") "loader") "proxies"
 }
 
 function Get-GameLoader {
-  # The system DLL the game imports, which the loader is built as and loaded in place of.
+  # The system DLL the game imports, which the loader stands in for.
   param([string]$game)
   $loader = Get-GameSetting $game "loader"
   $known = @(Get-ChildItem -LiteralPath (Get-LoaderProxyFolder) -Filter "*.txt" | ForEach-Object { $_.BaseName })
@@ -149,6 +157,11 @@ function Get-GameArchitecture {
 
 function Get-DiagnosticPlugins {
   return @("stability-guard.dll", "display-report.dll")
+}
+
+function Get-GameDefinitionFiles {
+  # What the loader reads to know which game it is in, from the game folder of ankh-plugins.
+  return @("game.cfg", "plugins.txt")
 }
 
 function Get-ShippedPlugins {
@@ -190,6 +203,9 @@ function Copy-ReleaseFiles {
   foreach ($plugin in $plugins) {
     Copy-LayoutFile (Join-Path $binaryFolder $plugin) (Join-Path $clientFolder "ankh-plugins")
   }
+  foreach ($definitionFile in Get-GameDefinitionFiles) {
+    Copy-LayoutFile (Join-Path (Join-Path $binaryFolder "game") $definitionFile) (Join-Path (Join-Path $clientFolder "ankh-plugins") "game")
+  }
   return "$($proxies -join ', '), plugins $($plugins -join ', ')"
 }
 
@@ -198,7 +214,8 @@ function Get-ReleaseFingerprint {
   param([string]$game)
   $binaryFolder = Get-GameBinaryFolder $game
   $lines = @()
-  foreach ($fileName in @(Get-GameProxies $game) + @(Get-ShippedPlugins $game)) {
+  $definitionFiles = @(Get-GameDefinitionFiles | ForEach-Object { Join-Path "game" $_ })
+  foreach ($fileName in @(Get-GameProxies $game) + @(Get-ShippedPlugins $game) + $definitionFiles) {
     $path = Join-Path $binaryFolder $fileName
     if (-not (Test-Path -LiteralPath $path)) {
       throw "$path is missing; run build.ps1 first"
