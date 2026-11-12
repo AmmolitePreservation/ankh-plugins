@@ -505,6 +505,25 @@ foreach(gameConfigFile IN LISTS gameConfigFiles)
   endif()
 endforeach()
 
+# The target central: every loader and every central plugin as a game with no part of its own takes them, which is
+# what the download for any game holds. No game needs it, so it is built only when asked for.
+file(GLOB proxyListFiles CONFIGURE_DEPENDS "${coreDirectory}/loader/proxies/*.txt")
+set(centralLibraries "")
+foreach(proxyListFile IN LISTS proxyListFiles)
+  get_filename_component(loaderName "${proxyListFile}" NAME_WE)
+  requireLoader(${loaderName})
+  list(APPEND centralLibraries loader.${loaderName})
+endforeach()
+foreach(pluginName IN LISTS centralPluginNames)
+  requireCentralPlugin(${pluginName})
+  list(APPEND centralLibraries central.${pluginName})
+endforeach()
+if(TARGET launcher-skip)
+  list(APPEND centralLibraries launcher-skip)
+endif()
+add_custom_target(central)
+add_dependencies(central ${centralLibraries})
+
 # Code under core/ and a plugins/ beside games/ cannot reach into games/: its quoted includes name a file beside it or
 # in an include directory, none climbs out of a folder, and no central target has an include directory under games/,
 # this repository's or the root's.

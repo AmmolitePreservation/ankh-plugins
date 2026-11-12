@@ -1,26 +1,37 @@
 <#
 .SYNOPSIS
-Builds a game's release: a zip to extract straight into the game's install folder.
+Builds a release zip: a game's, to extract straight into the game's install folder, or the kit of an architecture.
 
 .DESCRIPTION
-The zip holds what layout.ps1 lays out for the game, at the executable's place in its install folder: the loader DLL
-and an ankh-plugins folder with every plugin the game's plugins.txt names and, in its game folder, the game.cfg and
-plugins.txt the loader reads. It needs build.ps1 run for the game first. It
-carries no settings files: each plugin writes its own with the shipped defaults the first time the game starts, and a
-later release only adds the settings it introduces, so an update never resets a player's.
+A game's zip holds what layout.ps1 lays out for the game, at the executable's place in its install folder: the loader DLL
+and an ankh-plugins folder with every plugin the game's plugins.txt names, the licenses and, in its game folder, the
+game.cfg and plugins.txt the loader reads. It needs build.ps1 -game run first. It carries no settings files: each plugin
+writes its own with the shipped defaults the first time the game starts, and a later release only adds the settings it
+introduces, so an update never resets a player's.
+
+A kit's zip is for a game with no release of its own: every loader and every central plugin of the architecture, the
+licenses, a README, and a game.cfg and plugins.txt to fill in (layout.ps1, Copy-KitFiles). It needs
+build.ps1 -architecture run first.
 
 .PARAMETER game
 A folder under this repository's games.
+
+.PARAMETER architecture
+x64 or x86, for the kit in place of a game.
 
 .PARAMETER outputPath
 The zip to write. It must not exist yet.
 #>
 param(
-  [Parameter(Mandatory = $true)][string]$game,
+  [string]$game,
+  [ValidateSet("x64", "x86")][string]$architecture,
   [Parameter(Mandatory = $true)][string]$outputPath
 )
 
 $ErrorActionPreference = "Stop"
+if ([bool]$game -eq [bool]$architecture) {
+  throw "Name a game with -game, or an architecture with -architecture for its kit"
+}
 . (Join-Path $PSScriptRoot "layout.ps1") -rootFolder $PSScriptRoot
 
 function Write-PackageLog {
@@ -51,14 +62,18 @@ if (Test-Path -LiteralPath $outputPath) {
   throw "$outputPath already exists"
 }
 $stagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ankhPluginsPackage" + [System.Guid]::NewGuid().ToString("N"))
-$clientFolder = $stagingRoot
-$executableFolder = Split-Path (Get-GameExecutable $game)
-if ($executableFolder) {
-  $clientFolder = Join-Path $stagingRoot $executableFolder
-}
-New-Item -ItemType Directory -Path $clientFolder -Force | Out-Null
+New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
 try {
-  Write-PackageLog ("added " + (Copy-ReleaseFiles $game $clientFolder))
+  if ($game) {
+    $clientFolder = $stagingRoot
+    $executableFolder = Split-Path (Get-GameExecutable $game)
+    if ($executableFolder) {
+      $clientFolder = Join-Path $stagingRoot $executableFolder
+    }
+    Write-PackageLog ("added " + (Copy-ReleaseFiles $game $clientFolder))
+  } else {
+    Write-PackageLog ("added " + (Copy-KitFiles $architecture $stagingRoot))
+  }
   Write-Zip $stagingRoot
   Write-PackageLog ("wrote {0}: {1:N0} bytes" -f $outputPath, (Get-Item -LiteralPath $outputPath).Length)
 } finally {

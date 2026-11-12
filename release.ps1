@@ -1,15 +1,21 @@
 <#
 .SYNOPSIS
-Publishes a GitHub release for each game whose release files changed since its last release.
+Publishes a GitHub release for each game, and for the kit, whose release files changed since its last release.
 
 .DESCRIPTION
 For every game under games: builds it stamped "unversioned" in place of the commit, so the DLLs depend only on the
 code; a game with no release.md yet stops there. Otherwise it takes the release's fingerprint (layout.ps1). A game
 whose newest release carries the same fingerprint in its notes is left alone. Otherwise it is built again stamped with
 the checked-out commit, packed by package.ps1 into releases\ankh-plugins-<game>.zip and, with -publish,
-released as <game>-<yyyy.MM.dd>-<commit> with its release.md as title and notes. -test runs the Python client's tests
-with each build and, first, builds and tests the fixture games (fixtureRoot\games), which run the loader's own tests
-and are never released. Without -publish it only reports which games would be released. gh must be logged in.
+released as <game>-<yyyy.MM.dd>-<commit> with its release.md as title and notes.
+
+The kit, the download for a game with no release of its own, goes the same way: every loader and central plugin of
+x86 and of x64, fingerprinted as the two zips' contents, packed into releases\ankh-plugins-x86.zip and
+releases\ankh-plugins-x64.zip and released as plugin-kit-<yyyy.MM.dd>-<commit> with kit\release.md.
+
+-test runs the Python client's tests with each game's build and, first, builds and tests the fixture games
+(fixtureRoot\games), which run the loader's own tests and are never released. Without -publish it only reports what
+would be released. gh must be logged in.
 #>
 param(
   [switch]$test,
@@ -21,6 +27,9 @@ $ErrorActionPreference = "Stop"
 $repository = "AmmolitePreservation/ankh-plugins"
 $unversioned = "unversioned"
 $fingerprintPattern = '<!-- fingerprint ([0-9a-f]{64}) -->'
+$kitTag = "plugin-kit"
+$kitArchitectures = @("x86", "x64")
+$releasesFolder = Join-Path $PSScriptRoot "releases"
 
 function Write-ReleaseLog {
   param([string]$message)
@@ -36,12 +45,13 @@ function Invoke-Script {
 }
 
 function Get-PublishedFingerprint {
-  param([string]$game)
+  # The fingerprint in the notes of the newest release whose tag starts with <tagName>-; none when there is no release.
+  param([string]$tagName)
   $releases = & gh release list -R $repository --limit 1000 --json tagName,createdAt | ConvertFrom-Json
   if ($LASTEXITCODE -ne 0) {
     throw "gh release list failed"
   }
-  $newest = $releases | Where-Object { $_.tagName.StartsWith("$game-") } | Sort-Object createdAt -Descending | Select-Object -First 1
+  $newest = $releases | Where-Object { $_.tagName.StartsWith("$tagName-") } | Sort-Object createdAt -Descending | Select-Object -First 1
   if (-not $newest) {
     return $null
   }
@@ -55,37 +65,56 @@ function Get-PublishedFingerprint {
   return "none in $($newest.tagName)"
 }
 
-function Publish-Game {
-  param([string]$game, [string]$fingerprint)
+function New-ReleaseZip {
+  param([string]$name, [string[]]$packageArguments)
+  New-Item -ItemType Directory -Path $releasesFolder -Force | Out-Null
+  $zipPath = Join-Path $releasesFolder "ankh-plugins-$name.zip"
+  if (Test-Path -LiteralPath $zipPath) {
+    Remove-Item -LiteralPath $zipPath
+  }
+  # Out-Host: the script's lines would otherwise be this function's value beside the path.
+  Invoke-Script "package.ps1" ($packageArguments + @("-outputPath", $zipPath)) | Out-Host
+  return $zipPath
+}
+
+function Publish-Release {
+  # Releases the zips as <tagName>-<yyyy.MM.dd>-<commit>, with the notes file's # title and text and the fingerprint.
+  param([string]$tagName, [string]$notesSourcePath, [string[]]$zipPaths, [string]$fingerprint)
   $commit = (& git -C $PSScriptRoot rev-parse --short HEAD)
   if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse failed"
   }
-  Invoke-Script "build.ps1" @("-game", $game)
-  $releasesFolder = Join-Path $PSScriptRoot "releases"
-  New-Item -ItemType Directory -Path $releasesFolder -Force | Out-Null
-  $zipPath = Join-Path $releasesFolder "ankh-plugins-$game.zip"
-  if (Test-Path -LiteralPath $zipPath) {
-    Remove-Item -LiteralPath $zipPath
-  }
-  Invoke-Script "package.ps1" @("-game", $game, "-outputPath", $zipPath)
-  if (-not $publish) {
-    return
-  }
-  $notesSourcePath = Join-Path (Get-GameFolder $game) "release.md"
   $notes = @(Get-Content -Encoding UTF8 -LiteralPath $notesSourcePath)
   if ($notes[0] -notmatch '^# (.+)$') {
     throw "$notesSourcePath must start with a # title"
   }
   $stamp = (Get-Date).ToUniversalTime().ToString("yyyy.MM.dd")
   $title = "$($Matches[1]) $stamp ($commit)"
-  $notesPath = Join-Path $releasesFolder "$game-notes.md"
+  $notesPath = Join-Path $releasesFolder "$tagName-notes.md"
   $body = (($notes | Select-Object -Skip 1) + @("", "<!-- fingerprint $fingerprint -->")) -join "`n"
   [System.IO.File]::WriteAllText($notesPath, $body, (New-Object System.Text.UTF8Encoding $false))
   $fullCommit = (& git -C $PSScriptRoot rev-parse HEAD)
-  & gh release create "$game-$stamp-$commit" $zipPath -R $repository --target $fullCommit --title $title --notes-file $notesPath
+  & gh release create "$tagName-$stamp-$commit" @zipPaths -R $repository --target $fullCommit --title $title --notes-file $notesPath
   if ($LASTEXITCODE -ne 0) {
-    throw "gh release create failed for $game"
+    throw "gh release create failed for $tagName"
+  }
+  Write-ReleaseLog "released $tagName-$stamp-$commit"
+}
+
+function Get-KitFingerprint {
+  # The fingerprint of both architectures' kits as their zips lay them out.
+  $stagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ankhPluginsKit" + [System.Guid]::NewGuid().ToString("N"))
+  try {
+    foreach ($architecture in $kitArchitectures) {
+      $kitFolder = Join-Path $stagingRoot $architecture
+      New-Item -ItemType Directory -Path $kitFolder -Force | Out-Null
+      Copy-KitFiles $architecture $kitFolder | Out-Null
+    }
+    return Get-FolderFingerprint $stagingRoot
+  } finally {
+    if (Test-Path -LiteralPath $stagingRoot) {
+      Remove-Item -LiteralPath $stagingRoot -Recurse -Force
+    }
   }
 }
 
@@ -96,6 +125,9 @@ if ($test) {
   }
 }
 
+# Everything is fingerprinted on the unversioned build first, then what changed is built with the commit stamped in:
+# a build tree compiles all of its code again when the stamp changes.
+$changedGames = @{}
 foreach ($game in (Get-ChildItem -Directory -LiteralPath (Join-Path $PSScriptRoot "games")).Name) {
   $arguments = @("-game", $game, "-buildCommit", $unversioned)
   if ($test) {
@@ -113,5 +145,34 @@ foreach ($game in (Get-ChildItem -Directory -LiteralPath (Join-Path $PSScriptRoo
     continue
   }
   Write-ReleaseLog "$game changed: fingerprint $fingerprint, last release $published"
-  Publish-Game $game $fingerprint
+  $changedGames[$game] = $fingerprint
+}
+foreach ($architecture in $kitArchitectures) {
+  Invoke-Script "build.ps1" @("-architecture", $architecture, "-buildCommit", $unversioned)
+}
+$kitFingerprint = Get-KitFingerprint
+$publishedKit = Get-PublishedFingerprint $kitTag
+$isKitChanged = $publishedKit -ne $kitFingerprint
+if ($isKitChanged) {
+  Write-ReleaseLog "kit changed: fingerprint $kitFingerprint, last release $publishedKit"
+} else {
+  Write-ReleaseLog "kit unchanged (fingerprint $kitFingerprint)"
+}
+
+foreach ($game in ($changedGames.Keys | Sort-Object)) {
+  Invoke-Script "build.ps1" @("-game", $game)
+  $zipPath = New-ReleaseZip $game @("-game", $game)
+  if ($publish) {
+    Publish-Release $game (Join-Path (Get-GameFolder $game) "release.md") @($zipPath) $changedGames[$game]
+  }
+}
+if ($isKitChanged) {
+  $kitZipPaths = @()
+  foreach ($architecture in $kitArchitectures) {
+    Invoke-Script "build.ps1" @("-architecture", $architecture)
+    $kitZipPaths += New-ReleaseZip $architecture @("-architecture", $architecture)
+  }
+  if ($publish) {
+    Publish-Release $kitTag (Join-Path (Join-Path $PSScriptRoot "kit") "release.md") $kitZipPaths $kitFingerprint
+  }
 }

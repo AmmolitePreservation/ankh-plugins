@@ -12,7 +12,11 @@ it, and the ankh-plugins folder beside it gets every plugin the game's plugins.t
 game's game.cfg and plugins.txt, which tell the loader which game it is in; a newer build replaces all of them. No
 settings files: each plugin carries its own and writes or updates them in the ankh-plugins folder when the game starts,
 so a player's settings are never replaced. The diagnostic plugins never ship; Copy-PluginLayout -diagnostics adds them
-to an install, and the loader keeps a listed plugin whose DLL the folder holds.
+to an install, and the loader keeps a listed plugin whose DLL the folder holds. The licenses folder of ankh-plugins
+gets this repository's license and the notices of the code built into the DLLs.
+
+The kit is the download for a game that has none of its own: every loader and every central plugin of an architecture
+(the build's target central), with a game.cfg and a plugins.txt to fill in.
 #>
 param([Parameter(Mandatory = $true)][string]$rootFolder)
 
@@ -159,6 +163,62 @@ function Get-DiagnosticPlugins {
   return @("stability-guard.dll", "display-report.dll")
 }
 
+function Get-CentralBinaryFolder {
+  # Where the build's target central puts every loader and central plugin of an architecture.
+  param([string]$architecture)
+  return Join-Path (Join-Path (Join-Path (Join-Path $rootFolder "build") $architecture) "central") "bin"
+}
+
+function Get-LoaderNames {
+  return @(Get-ChildItem -LiteralPath (Get-LoaderProxyFolder) -Filter "*.txt" | ForEach-Object { $_.BaseName } | Sort-Object)
+}
+
+function Get-CentralPlugins {
+  # Every plugin any game can take: the folders of the repository's plugins and the root's. launcher-skip is none of
+  # them: the loader does not load it (Get-KitProxies).
+  $folders = @((Join-Path $repositoryFolder "plugins"), (Join-Path $rootFolder "plugins")) | Select-Object -Unique
+  $names = @()
+  foreach ($folder in $folders) {
+    if (Test-Path -LiteralPath $folder -PathType Container) {
+      $names += @(Get-ChildItem -LiteralPath $folder -Directory | Where-Object { $_.Name -ne "launcher-skip" } | ForEach-Object { $_.Name })
+    }
+  }
+  return @($names | Sort-Object | ForEach-Object { "$_.dll" })
+}
+
+function Get-KitProxies {
+  # The DLLs of a kit that go beside an executable: every loader, and launcher-skip's msimg32.dll, which is x86 only.
+  param([string]$architecture)
+  $proxies = @(Get-LoaderNames | ForEach-Object { "$_.dll" })
+  if ($architecture -eq "x86") {
+    $proxies += "msimg32.dll"
+  }
+  return $proxies
+}
+
+function Get-LicenseFiles {
+  # Source path and the name it has in an install's licenses folder: this repository's license, and the notice the
+  # vendored hooking library asks to travel with every binary built from it.
+  return @(
+    @{ source = (Join-Path $repositoryFolder "LICENSE"); name = "ankh-plugins.txt" },
+    @{ source = (Join-Path (Join-Path (Join-Path (Join-Path (Join-Path $repositoryFolder "core") "shared") "vendor") "minhook") "LICENSE.txt"); name = "MinHook.txt" }
+  )
+}
+
+function Copy-LicenseFiles {
+  param([string]$pluginsFolder)
+  $licensesFolder = Join-Path $pluginsFolder "licenses"
+  if (-not (Test-Path -LiteralPath $licensesFolder)) {
+    New-Item -ItemType Directory -Path $licensesFolder -Force | Out-Null
+  }
+  foreach ($license in Get-LicenseFiles) {
+    if (-not (Test-Path -LiteralPath $license.source)) {
+      throw "$($license.source) is missing"
+    }
+    Copy-Item -LiteralPath $license.source -Destination (Join-Path $licensesFolder $license.name) -Force
+  }
+}
+
 function Get-GameDefinitionFiles {
   # What the loader reads to know which game it is in, from the game folder of ankh-plugins.
   return @("game.cfg", "plugins.txt")
@@ -206,7 +266,53 @@ function Copy-ReleaseFiles {
   foreach ($definitionFile in Get-GameDefinitionFiles) {
     Copy-LayoutFile (Join-Path (Join-Path $binaryFolder "game") $definitionFile) (Join-Path (Join-Path $clientFolder "ankh-plugins") "game")
   }
+  Copy-LicenseFiles (Join-Path $clientFolder "ankh-plugins")
   return "$($proxies -join ', '), plugins $($plugins -join ', ')"
+}
+
+function Copy-KitFiles {
+  # Lays the kit of an architecture out in an empty folder: README.txt, loaders\ with every DLL that goes beside an
+  # executable, and the ankh-plugins folder with every central plugin, the licenses and, in game\, a game.cfg to fill
+  # in and a plugins.txt that lists every plugin switched off.
+  param([string]$architecture, [string]$kitFolder)
+  $binaryFolder = Get-CentralBinaryFolder $architecture
+  $kitSource = Join-Path $repositoryFolder "kit"
+  $pluginsFolder = Join-Path $kitFolder "ankh-plugins"
+  $gameFolder = Join-Path $pluginsFolder "game"
+  $proxies = @(Get-KitProxies $architecture)
+  $plugins = @(Get-CentralPlugins)
+  foreach ($proxy in $proxies) {
+    Copy-LayoutFile (Join-Path $binaryFolder $proxy) (Join-Path $kitFolder "loaders")
+  }
+  foreach ($plugin in $plugins) {
+    Copy-LayoutFile (Join-Path $binaryFolder $plugin) $pluginsFolder
+  }
+  Copy-LicenseFiles $pluginsFolder
+  New-Item -ItemType Directory -Path $gameFolder -Force | Out-Null
+  $ascii = [System.Text.Encoding]::ASCII
+  $readme = @(Get-Content -LiteralPath (Join-Path $kitSource "README.txt"))
+  [System.IO.File]::WriteAllText((Join-Path $kitFolder "README.txt"), (($readme -join "`r`n") + "`r`n"), $ascii)
+  $gameSettings = @(Get-Content -LiteralPath (Join-Path $kitSource "game.cfg")) | ForEach-Object { $_.Replace("{architecture}", $architecture) }
+  [System.IO.File]::WriteAllText((Join-Path $gameFolder "game.cfg"), (($gameSettings -join "`r`n") + "`r`n"), $ascii)
+  $pluginList = @(
+    "# The plugins the loader loads into the game, one DLL per line in load order, from the ankh-plugins folder.",
+    "# A line starting with # switches that plugin off: remove the # in front of the ones the game should load.",
+    "# After the first start the list to edit is plugins.txt in the ankh-plugins folder, which starts as a copy of this."
+  ) + @($plugins | ForEach-Object { "#$_" })
+  [System.IO.File]::WriteAllText((Join-Path $gameFolder "plugins.txt"), (($pluginList -join "`r`n") + "`r`n"), $ascii)
+  return "$($proxies -join ', '), plugins $($plugins -join ', ')"
+}
+
+function Get-FolderFingerprint {
+  # The SHA-256 of a folder's files by relative path: the same files give the same fingerprint, whatever a zip's timestamps.
+  param([string]$folder)
+  $lines = @()
+  foreach ($file in Get-ChildItem -LiteralPath $folder -Recurse -File | Sort-Object FullName) {
+    $lines += $file.FullName.Substring($folder.Length + 1).Replace("\", "/") + " " + (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
+  }
+  $bytes = [System.Text.Encoding]::ASCII.GetBytes(($lines -join "`n"))
+  $hasher = New-Object System.Security.Cryptography.SHA256Managed
+  return ([System.BitConverter]::ToString($hasher.ComputeHash($bytes)) -replace "-", "").ToLowerInvariant()
 }
 
 function Get-ReleaseFingerprint {
@@ -221,6 +327,9 @@ function Get-ReleaseFingerprint {
       throw "$path is missing; run build.ps1 first"
     }
     $lines += $fileName + " " + (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+  }
+  foreach ($license in Get-LicenseFiles) {
+    $lines += "licenses/" + $license.name + " " + (Get-FileHash -Algorithm SHA256 -LiteralPath $license.source).Hash.ToLowerInvariant()
   }
   $bytes = [System.Text.Encoding]::ASCII.GetBytes(($lines -join "`n"))
   $hasher = New-Object System.Security.Cryptography.SHA256Managed

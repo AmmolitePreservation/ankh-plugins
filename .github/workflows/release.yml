@@ -1,6 +1,6 @@
 # Every game under games and every fixture game under fixtureRoot builds and runs its tests on each pull request to main
-# and each push to main, and the games whose release files changed are reported. Nothing is published: release.ps1 runs
-# without -publish.
+# and each push to main, and what would be released is reported: the games and the kit whose release files changed.
+# A push to main also publishes those as GitHub releases.
 name: release
 
 on:
@@ -15,6 +15,8 @@ on:
       - fixtureRoot/**
       - python/**
       - cmake/**
+      - kit/**
+      - LICENSE
       - CMakeLists.txt
       - build.ps1
       - layout.ps1
@@ -33,7 +35,10 @@ concurrency:
 jobs:
   release:
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 45
+    permissions:
+      # A release is created with the run's own token.
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -49,9 +54,17 @@ jobs:
           python -m venv .venv || exit /b 1
           .venv\Scripts\python.exe -m pip install -e .
 
-      # release.ps1 reads each game's newest release to tell which games changed, which takes the token.
-      - name: Build, test and report changed games
+      # release.ps1 reads each newest release to tell what changed, which takes the token.
+      - name: Build, test and report what changed
+        if: github.event_name == 'pull_request'
         shell: cmd
         env:
           GH_TOKEN: ${{ github.token }}
         run: powershell -NoProfile -ExecutionPolicy Bypass -File release.ps1 -test
+
+      - name: Build, test and release what changed
+        if: github.event_name == 'push'
+        shell: cmd
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File release.ps1 -test -publish
