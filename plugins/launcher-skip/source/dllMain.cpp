@@ -1,5 +1,6 @@
 #include "entryPointHook.h"
 #include "fatalError.h"
+#include "gameDefinition.h"
 #include "modulePath.h"
 #include "sessionLog.h"
 
@@ -10,12 +11,6 @@
 
 #ifndef ankhPluginsBuildCommit
 #error "ankhPluginsBuildCommit must be defined by the build (see build.ps1)"
-#endif
-#ifndef ankhPluginsGameExecutable
-#error "ankhPluginsGameExecutable must be defined by the build (see build.ps1)"
-#endif
-#ifndef ankhPluginsLauncherExecutable
-#error "ankhPluginsLauncherExecutable must be defined by the build (see build.ps1)"
 #endif
 #if !defined(_M_IX86)
 #error "launcher-skip's msimg32.dll stubs are x86 only"
@@ -52,6 +47,8 @@ msimg32Exports(declarePointer)
 msimg32Exports(declareStub)
 
 static HMODULE skipModule = nullptr;
+// The launcher to skip and the game to start in its place come from the install (ankh-plugins\game\game.cfg).
+static GameDefinition game;
 
 static void loadSystemMsimg32() {
   char systemDirectory[MAX_PATH];
@@ -94,7 +91,7 @@ static void skipLauncher() {
   openSessionLog(folder + "\\" + pluginsFolderName, pluginName, sessionStamp);
   writeLogLine("INFO", "sessionStart version=%s buildCommit=%s launcher=%s", launcherSkipVersion, ankhPluginsBuildCommit,
     executablePath().c_str());
-  const std::string gamePath = folder + "\\" + ankhPluginsGameExecutable;
+  const std::string gamePath = folder + "\\" + game.executableName;
   std::string commandLine = "\"" + gamePath + "\"";
   STARTUPINFOA startupInfo = {};
   startupInfo.cb = sizeof(startupInfo);
@@ -119,9 +116,15 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved
     skipModule = instance;
     DisableThreadLibraryCalls(instance);
     loadSystemMsimg32();
+    const std::string pluginsDirectory = resolveModuleDirectory(instance) + "\\" + pluginsFolderName;
+    game = readGameDefinition(pluginsDirectory);
+    if (game.launcherName.empty()) {
+      fatalError("%s names no launcher, so this game takes no launcher-skip (msimg32.dll)",
+        gameDefinitionPath(pluginsDirectory, "game.cfg").c_str());
+    }
     const std::string path = executablePath();
     const size_t separator = path.find_last_of('\\');
-    if (_stricmp(path.c_str() + separator + 1, ankhPluginsLauncherExecutable) == 0 && reserved != nullptr) {
+    if (_stricmp(path.c_str() + separator + 1, game.launcherName.c_str()) == 0 && reserved != nullptr) {
       installEntryPointHook(&skipLauncher);
     }
   }

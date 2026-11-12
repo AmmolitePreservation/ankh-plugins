@@ -1,7 +1,8 @@
 """A game a root has plugins for: <root>\\games\\<name>\\game.cfg names its executable relative to its install folder,
 its architecture (x64 or x86), the system DLL its loader stands in for, the companions that also get the plugins and,
 for a game whose handlers need one build of the executable, that build's timeDateStamp. A root is this repository or
-another folder that holds games (build.ps1 -root)."""
+another folder that holds games (build.ps1 -root). An install carries the game's game.cfg and plugins.txt in the game
+folder of its ankh-plugins folder, where the loader reads which game it is in."""
 import re
 from pathlib import Path
 
@@ -39,10 +40,15 @@ class Game:
     if stamps and not re.fullmatch(r"0x[0-9A-F]{8}", stamps[0]):
       raise ValueError(f"{configPath}: timeDateStamp must be 0x and eight hexadecimal digits in capitals, not {stamps[0]!r}")
     self.architecture = settings["architecture"][0]
+    self.loader = settings["loader"][0]
     self.name = name
     self.installFolder = Path(installFolder).resolve()
     self.executablePath = self.installFolder / executables[0]
     self.executableName = self.executablePath.name
     self.companionPaths = [self.executablePath.parent / companion for companion in settings["companion"]]
+    if len(settings["launcher"]) > 1:
+      raise ValueError(f"{configPath} sets launcher more than once")
+    self.launcherPath = self.executablePath.parent / settings["launcher"][0] if settings["launcher"] else None
     self.timeDateStamp = int(stamps[0], 16) if stamps else None
     self.pluginsFolder = self.executablePath.parent / pluginsFolderName
+    self.definitionFolder = self.pluginsFolder / "game"

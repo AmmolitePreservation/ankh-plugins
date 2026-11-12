@@ -4,7 +4,8 @@ Builds a game's release: a zip to extract straight into the game's install folde
 
 .DESCRIPTION
 The zip holds what layout.ps1 lays out for the game, at the executable's place in its install folder: the loader DLL
-and an ankh-plugins folder with every plugin the game's plugins.txt names. It needs build.ps1 run for the game first. It
+and an ankh-plugins folder with every plugin the game's plugins.txt names and, in its game folder, the game.cfg and
+plugins.txt the loader reads. It needs build.ps1 run for the game first. It
 carries no settings files: each plugin writes its own with the shipped defaults the first time the game starts, and a
 later release only adds the settings it introduces, so an update never resets a player's.
 

@@ -1,5 +1,6 @@
 #include "entryPointHook.h"
 #include "fatalError.h"
+#include "gameDefinition.h"
 #include "hookRegistry.h"
 #include "lateStart.h"
 #include "linePipe.h"
@@ -27,6 +28,8 @@ static const char* const pluginsFolderName = "ankh-plugins";
 static const char* const commandPipeBaseName = "ankh-plugins";
 
 static HMODULE loaderModule = nullptr;
+// One loader serves every game that imports the DLL it stands in for: which game this is comes from the install.
+static GameDefinition game;
 // Names this game session in every plugin's log file; plugins reloaded later keep using it.
 static char sessionStamp[32];
 static LinePipeServer commandPipe;
@@ -43,7 +46,7 @@ static void requireDirectory(const std::string& path, const char* description) {
 enum class ExecutableRole { game, companion, other };
 
 // Every program in the game's folder that imports the DLL the loader stands in for loads this copy: only the game's
-// executable, the first name the build gives, and its companions (game.cfg) get the plugins.
+// executable and its companions (game.cfg) get the plugins.
 static ExecutableRole executableRole() {
   char executablePath[MAX_PATH];
   const DWORD executablePathLength = GetModuleFileNameA(nullptr, executablePath, sizeof(executablePath));
@@ -52,18 +55,32 @@ static ExecutableRole executableRole() {
   }
   const char* executableName = strrchr(executablePath, '\\');
   executableName = executableName != nullptr ? executableName + 1 : executablePath;
-  const char* candidate = ankhPluginsGameExecutables;
-  ExecutableRole role = ExecutableRole::game;
-  while (*candidate != '\0') {
-    const char* separator = strchr(candidate, '|');
-    const size_t length = separator != nullptr ? static_cast<size_t>(separator - candidate) : strlen(candidate);
-    if (strlen(executableName) == length && _strnicmp(executableName, candidate, length) == 0) {
-      return role;
+  if (_stricmp(executableName, game.executableName.c_str()) == 0) {
+    return ExecutableRole::game;
+  }
+  for (const std::string& companionName : game.companionNames) {
+    if (_stricmp(executableName, companionName.c_str()) == 0) {
+      return ExecutableRole::companion;
     }
-    role = ExecutableRole::companion;
-    candidate += separator != nullptr ? length + 1 : length;
   }
   return ExecutableRole::other;
+}
+
+// The files of another game in this folder would leave this game without its plugins and say nothing: its game.cfg
+// names an executable that never starts here.
+static void readGame() {
+  const std::string clientFolder = resolveModuleDirectory(loaderModule);
+  const std::string pluginsDirectory = clientFolder + "\\" + pluginsFolderName;
+  game = readGameDefinition(pluginsDirectory);
+  const std::string gameFile = gameDefinitionPath(pluginsDirectory, "game.cfg");
+  if (_stricmp((game.loaderName + ".dll").c_str(), systemProxyLibraryName()) != 0) {
+    fatalError("%s is for a game whose loader is %s.dll, but this loader is %s", gameFile.c_str(), game.loaderName.c_str(),
+      systemProxyLibraryName());
+  }
+  if (GetFileAttributesA((clientFolder + "\\" + game.executableName).c_str()) == INVALID_FILE_ATTRIBUTES) {
+    fatalError("%s is for the game %s, which is not in %s", gameFile.c_str(), game.executableName.c_str(),
+      clientFolder.c_str());
+  }
 }
 
 static const IMAGE_NT_HEADERS* executableHeaders() {
@@ -86,18 +103,16 @@ static void logExecutable() {
     static_cast<const void*>(GetModuleHandleA(nullptr)));
 }
 
-#ifdef ankhPluginsGameTimeDateStamp
 // A game's handlers hold addresses and code bytes of one build of its executable (game.cfg's timeDateStamp); in any
-// other build they would patch the wrong code. A companion is another program with a build of its own.
+// other build they would patch the wrong code. A companion is another program with a build of its own, and a game
+// whose game.cfg names no build gets the plugins in any.
 static void requireGameBuild() {
-  const DWORD expected = ankhPluginsGameTimeDateStamp;
   const DWORD found = executableHeaders()->FileHeader.TimeDateStamp;
-  if (executableRole() == ExecutableRole::game && found != expected) {
+  if (game.namesBuild && executableRole() == ExecutableRole::game && found != game.timeDateStamp) {
     fatalError("This is not the build of the game these plugins were made for: the executable's timeDateStamp is "
-      "0x%08lX, not 0x%08lX", found, expected);
+      "0x%08lX, not 0x%08lX", found, game.timeDateStamp);
   }
 }
-#endif
 
 // Runs on the main thread outside the loader lock: at the game's entry point, or after a late load at the unpacked
 // game's first startup call.
@@ -111,9 +126,7 @@ static void runLoader() {
     now.wMinute, now.wSecond);
   openSessionLog(pluginsDirectory, pluginName, sessionStamp);
   logExecutable();
-#ifdef ankhPluginsGameTimeDateStamp
   requireGameBuild();
-#endif
   if (isLateStart) {
     writeLogLine("INFO", "startMode mode=late trigger=%s", lateStartTrigger());
   } else {
@@ -134,6 +147,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved
     loaderModule = instance;
     DisableThreadLibraryCalls(instance);
     loadSystemProxyLibrary();
+    readGame();
     if (executableRole() == ExecutableRole::other) {
       return TRUE;
     }

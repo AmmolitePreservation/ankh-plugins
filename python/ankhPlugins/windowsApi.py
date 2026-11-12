@@ -7,11 +7,17 @@ user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 windowMessageClose = 0x0010
+windowMessageGetText = 0x000D
 windowMessageMouseMove = 0x0200
 windowLongStyle = -16
 systemMetricScreenWidth = 0
 systemMetricScreenHeight = 1
 showMinimizedWithoutActivating = 7
+sendMessageAbortIfHung = 0x0002
+controlTextMilliseconds = 2000
+controlTextCapacity = 4096
+dialogClass = "#32770"
+staticClass = "Static"
 snapshotProcesses = 0x00000002
 invalidHandle = wintypes.HANDLE(-1).value
 enumWindowsProcedure = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -25,6 +31,10 @@ user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user32.GetForegroundWindow.restype = wintypes.HWND
+user32.EnumChildWindows.argtypes = [wintypes.HWND, enumWindowsProcedure, wintypes.LPARAM]
+user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+user32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM, wintypes.UINT,
+  wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
 kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
 
 
@@ -76,6 +86,43 @@ def windowTitle(window):
   title = ctypes.create_unicode_buffer(256)
   user32.GetWindowTextW(window, title, len(title))
   return title.value
+
+
+def windowClass(window):
+  name = ctypes.create_unicode_buffer(256)
+  if not user32.GetClassNameW(window, name, len(name)):
+    raiseLastError("GetClassNameW")
+  return name.value
+
+
+def controlText(control):
+  """The text of a control, which GetWindowText does not read in another process."""
+  text = ctypes.create_unicode_buffer(controlTextCapacity)
+  copied = ctypes.c_size_t()
+  if not user32.SendMessageTimeoutW(control, windowMessageGetText, controlTextCapacity,
+      ctypes.cast(text, ctypes.c_void_p).value, sendMessageAbortIfHung, controlTextMilliseconds, ctypes.byref(copied)):
+    raiseLastError("SendMessageTimeoutW")
+  return text.value
+
+
+def messageBoxes(processID):
+  """The message boxes the process shows, as (title, message)."""
+  boxes = []
+  for window in topLevelWindows(processID):
+    if windowClass(window) != dialogClass or not user32.IsWindowVisible(window):
+      continue
+    texts = []
+
+    def visit(control, _):
+      if windowClass(control) == staticClass:
+        text = controlText(control)
+        if text:
+          texts.append(text)
+      return True
+
+    user32.EnumChildWindows(window, enumWindowsProcedure(visit), 0)
+    boxes.append((windowTitle(window), "\n".join(texts)))
+  return boxes
 
 
 def windowRectangle(window):
