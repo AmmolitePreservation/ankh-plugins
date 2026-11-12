@@ -6,7 +6,7 @@ The plugin is the unit: it is written and built once, for every game, and a game
 ## Install
 A game's release is a zip to extract into the folder that holds the game's executable; it needs nothing else, Ankh included. Its notes say what it fixes and anything the game needs set. To remove it, delete the loader DLL its notes name (`version.dll` for most, and `msimg32.dll` for a game whose release has one) and the `ankh-plugins` folder from the game's folder. Each plugin writes its settings file into `ankh-plugins` the first time the game starts.
 
-Releases are listed at [releases](https://github.com/AmmolitePreservation/ankh-plugins/releases). Publishing is switched off (see Releases), so a game is installed from a build for now (see Build, test and install).
+Releases are listed at [releases](https://github.com/AmmolitePreservation/ankh-plugins/releases): one per game here, and the kit for any other game, which holds every plugin and the loader for 32-bit and 64-bit games with a `README.txt` of the few steps to set them up (which executable, which loader, which plugins).
 
 ## Layout
 | Folder | What it holds |
@@ -16,6 +16,7 @@ Releases are listed at [releases](https://github.com/AmmolitePreservation/ankh-p
 | `core/plugin/` | Source every plugin is linked with and the loader is not: the `PluginInterfaceVersion` export. |
 | `plugins/<name>/` | One plugin, built once for all the games that take it as it is. |
 | `games/<game>/` | One game: `game.cfg`, `plugins.txt` (the plugins its release ships), `release.md` (its release notes, starting with a `#` title), `<plugin>.cfg` for any plugin whose shipped settings differ for this game, `handlers/<plugin>/` for the handlers of a plugin this game replaces (see Writing a plugin), and `plugins/<name>/` for plugins only this game needs. |
+| `kit/` | What the kit carries beside the DLLs: its `README.txt`, the `game.cfg` a player fills in, and its release notes. |
 | `python/ankhPlugins/` | A game from outside: launches it without taking the foreground, talks to the loader's pipe, reads the plugins' session logs, and captures the game's window. |
 | `fixtureRoot/` | The loader's test fixture, laid out as a root of its own (see below): a small game the build makes itself, which can also act as a Direct3D 9 game, the three fixture games that run it, and `echo`, a plugin whose commands exercise every way the loader answers one. |
 | `python/tests/`, `python/fixtureTests/` | The Python client's tests, and the tests that run the loader and the plugins in the fixture game. |
@@ -51,6 +52,7 @@ A root is a folder that holds `games/` and, optionally, `plugins/`. This reposit
   ankh-plugins\
     game\game.cfg         which game this is, for the loader: the game's game.cfg, replaced by each release
     game\plugins.txt      the release's plugins in load order: the game's plugins.txt, replaced by each release
+    licenses\             this repository's license and the notice of the hooking library built into the DLLs
     plugins.txt           the plugins to load, in order: the player's, started from the release's and kept up with it
     <plugin>.dll, <plugin>.cfg
     loaded\               shadow copies the game runs from, so a build can replace any plugin
@@ -73,18 +75,18 @@ A build is for one game:
 
 Run it as `powershell -NoProfile -File build.ps1 ...` when calling from another PowerShell, which otherwise turns native stderr into errors.
 
-The games of one architecture (game.cfg) share a build tree, `build\<architecture>` under their root (see Layout), and each game is a target in it. What no game changes is built once there, in `central\bin`, however many games are built: the shared code as a library, the loader as each system DLL, each plugin's own code, and the DLL of a plugin for every game that takes it as it is. Only what is a game's own is built for the game: its plugins, and its build of a central plugin it gives a handler or a settings file. So a second game of the same architecture compiles little, and one with no code of its own compiles nothing. A game's files land in `build\<architecture>\games\<game>\bin`, checked for the exports the loader and Windows look up: the loader its `game.cfg` names, the plugins its `plugins.txt` lists and the diagnostic ones (its own builds, and copies of the central DLLs), and in `game\` its `game.cfg` and `plugins.txt` as an install carries them. A plugin no game lists is not built.
+The games of one architecture (game.cfg) share a build tree, `build\<architecture>` under their root (see Layout), and each game is a target in it. What no game changes is built once there, in `central\bin`, however many games are built: the shared code as a library, the loader as each system DLL, each plugin's own code, and the DLL of a plugin for every game that takes it as it is. Only what is a game's own is built for the game: its plugins, and its build of a central plugin it gives a handler or a settings file. So a second game of the same architecture compiles little, and one with no code of its own compiles nothing. A game's files land in `build\<architecture>\games\<game>\bin`, checked for the exports the loader and Windows look up: the loader its `game.cfg` names, the plugins its `plugins.txt` lists and the diagnostic ones (its own builds, and copies of the central DLLs), and in `game\` its `game.cfg` and `plugins.txt` as an install carries them. A plugin no game lists is not built for a game. `.\build.ps1 -architecture x86` (or `x64`), with no game, builds the target `central`: every loader and every central plugin of that architecture, which is what the kit holds.
 
 `-test` runs the Python client's tests and, for a fixture game (`.\build.ps1 -root fixtureRoot -game fixture-x64 -test`), installs the build beside the game the build made and runs the loader's tests in it (`python/fixtureTests`): plugin loading, a call passed on to the system DLL, the command pipe, pump callbacks on the game's main thread, a game's handler in place of a plugin's, reload, a companion, the check of the game's build, what the loader does with a game folder it cannot use, and `launcher-skip` in the launcher the build makes for `fixture-x86`. Started with `direct3D windowed <width> <height>` or `direct3D fullscreen`, the fixture game creates a window, a Direct3D 9 device and a DirectInput 8 keyboard as a game does, and writes what it asked for and what it got to `fixtureReport.txt`; the tests of `display-guard` and `frame-control` read that report, the plugins' logs and the window itself. They need a graphics adapter Direct3D 9 can create a hardware device on, and the fixture's window covers the primary monitor for a few seconds a test. The fixture games are the only ones the tests start; a real game is checked by playing it.
 
 `-gameFolder` lays the build out in that install folder as a release does (`layout.ps1`): the loader DLL beside the executable and the rest in `ankh-plugins`, the game's `game.cfg` and `plugins.txt` in its `game` folder. It copies no settings files: the plugins write and update their own (see Settings files). `-diagnostics` also installs `stability-guard` and `display-report` and lists them in `plugins.txt`; the loader keeps a listed plugin the release does not ship as long as its DLL is in the folder. Removing the loader DLL from the install folder turns every plugin off.
 
-`.\package.ps1 -game soma -outputPath <zip>` packs a built game's release: the same layout, without the diagnostic plugins.
+`.\package.ps1 -game soma -outputPath <zip>` packs a built game's release: the same layout, without the diagnostic plugins. `.\package.ps1 -architecture x86 -outputPath <zip>` packs that architecture's kit.
 
 ### Releases
-A game is released only when its release files change. `release.ps1` builds every game under `games` with `-buildCommit unversioned`, so the DLLs depend only on the code; builds are reproducible (`/Brepro`). It then fingerprints the files the game's zip ships, and compares that with the fingerprint in the notes of the game's newest release. A game whose fingerprint differs is built again with the commit stamped in, packed, and, with `-publish`, released as `<game>-<yyyy.MM.dd>-<commit>`, with its `release.md` as title and notes. A change to a plugin the game does not ship, or to anything outside the code, leaves its release alone. A game with no `release.md` is built and tested but never released. With `-test`, `release.ps1` first builds and tests the fixture games under `fixtureRoot/games`.
+A game is released only when its release files change, and so is the kit. `release.ps1` builds every game under `games` with `-buildCommit unversioned`, so the DLLs depend only on the code; builds are reproducible (`/Brepro`). It then fingerprints the files the game's zip ships, and compares that with the fingerprint in the notes of the game's newest release. A game whose fingerprint differs is built again with the commit stamped in, packed, and, with `-publish`, released as `<game>-<yyyy.MM.dd>-<commit>`, with its `release.md` as title and notes. A change to a plugin the game does not ship, or to anything outside the code, leaves its release alone. A game with no `release.md` is built and tested but never released. The kit goes the same way with both architectures as one release, `plugin-kit-<yyyy.MM.dd>-<commit>`, holding `ankh-plugins-x86.zip` and `ankh-plugins-x64.zip`, with `kit/release.md` as its notes. Everything is fingerprinted on the unversioned build before anything is stamped, so a build tree changes stamps once. With `-test`, `release.ps1` first builds and tests the fixture games under `fixtureRoot/games`.
 
-`.github/workflows/release.yml` runs `release.ps1 -test` on each pull request to `main` and each push to `main`: every game and fixture game is built, the tests run, and the games that would be released are reported. Nothing is published: the workflow does not pass `-publish`.
+`.github/workflows/release.yml` runs `release.ps1 -test` on each pull request to `main`: every game and fixture game is built, the tests run, and what would be released is reported. On each push to `main` it runs `release.ps1 -test -publish`, which releases the games and the kit whose files changed.
 
 ### game.cfg
 - `executable=` the game's executable, relative to its install folder; the loader DLL and `ankh-plugins` go beside it.
@@ -137,3 +139,8 @@ $env:ankhPluginsGameFolder = "<SOMA install folder>"
 ```
 
 `launch` passes its extra arguments to the game and refuses while the game's executable is already running. `status` shows the process and its windows, and `kill` terminates a game that will not close.
+
+## License
+[MIT No Attribution](LICENSE): use, change and share any of it, for anything, with no conditions. Credit is welcome and never required.
+
+The DLLs are built with [MinHook](https://github.com/TsudaKageyu/minhook) (BSD 2-Clause, in `core/shared/vendor/minhook`), whose license asks that its notice travels with binaries built from it: every install and release carries it in `ankh-plugins\licenses`.

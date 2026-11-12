@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
   Builds ankh-plugins for one game: DLLs for its architecture (game.cfg) from Visual Studio's MSVC, CMake
-  and Ninja.
+  and Ninja. With -architecture in place of -game it builds every loader and central plugin of that architecture, as
+  the download for any game holds them.
 .DESCRIPTION
   -game names a folder under the root's games. The root is this repository, or with -root another folder that holds
   games and, optionally, plugins of its own, which are built beside this repository's. The root's build\<architecture>
@@ -17,9 +18,12 @@
   .\build.ps1 -game soma -test -diagnostics -gameFolder "<SOMA install folder>"
 .EXAMPLE
   .\build.ps1 -root fixtureRoot -game fixture-x64 -test
+.EXAMPLE
+  .\build.ps1 -architecture x86
 #>
 param(
-  [Parameter(Mandatory = $true)][string]$game,
+  [string]$game,
+  [ValidateSet("x64", "x86")][string]$architecture,
   [string]$root,
   [switch]$test,
   [string]$gameFolder,
@@ -29,6 +33,12 @@ param(
 if ($diagnostics -and -not $gameFolder) {
   throw "-diagnostics adds the diagnostic plugins to the -gameFolder install"
 }
+if ([bool]$game -eq [bool]$architecture) {
+  throw "Name a game with -game, or an architecture with -architecture for every loader and central plugin of it"
+}
+if ($architecture -and ($test -or $gameFolder)) {
+  throw "-test and -gameFolder are for a game"
+}
 $ErrorActionPreference = "Stop"
 # Not a parameter default: run with powershell -File, $PSScriptRoot is still empty when the defaults are evaluated.
 if (-not $root) {
@@ -36,20 +46,35 @@ if (-not $root) {
 }
 $root = (Resolve-Path -LiteralPath $root).Path
 . (Join-Path $PSScriptRoot "layout.ps1") -rootFolder $root
-$buildDirectory = Get-BuildFolder $game
-$gameBuildDirectory = Get-GameBuildFolder $game
-$binaryDirectory = Get-GameBinaryFolder $game
-$loader = Get-GameLoader $game
-$requiredExports = @{ "$loader.dll" = @(Get-Content -LiteralPath (Join-Path (Get-LoaderProxyFolder) "$loader.txt")) }
-$launcher = @(Get-GameLauncher $game)
-if ($launcher.Count -eq 1) {
+$requiredExports = @{}
+if ($game) {
+  $buildTarget = $game
+  $buildDirectory = Get-BuildFolder $game
+  $gameBuildDirectory = Get-GameBuildFolder $game
+  $binaryDirectory = Get-GameBinaryFolder $game
+  $loaders = @(Get-GameLoader $game)
+  $launcher = @(Get-GameLauncher $game)
+  $hasLauncherSkip = $launcher.Count -eq 1
+  $architecture = Get-GameArchitecture $game
+  # Read here so that a game.cfg the build could not use stops it with the reason.
+  Get-GameCompanions $game | Out-Null
+  Get-GameTimeDateStamp $game | Out-Null
+  $plugins = @(Get-ShippedPlugins $game) + @(Get-DiagnosticPlugins)
+} else {
+  $buildTarget = "central"
+  $buildDirectory = Split-Path (Split-Path (Get-CentralBinaryFolder $architecture))
+  $binaryDirectory = Get-CentralBinaryFolder $architecture
+  $loaders = @(Get-LoaderNames)
+  $hasLauncherSkip = $architecture -eq "x86"
+  $plugins = @(Get-CentralPlugins)
+}
+foreach ($loader in $loaders) {
+  $requiredExports["$loader.dll"] = @(Get-Content -LiteralPath (Join-Path (Get-LoaderProxyFolder) "$loader.txt"))
+}
+if ($hasLauncherSkip) {
   $requiredExports["msimg32.dll"] = @("AlphaBlend")
 }
-$architecture = Get-GameArchitecture $game
-# Read here so that a game.cfg the build could not use stops it with the reason.
-Get-GameCompanions $game | Out-Null
-Get-GameTimeDateStamp $game | Out-Null
-foreach ($plugin in @(Get-ShippedPlugins $game) + @(Get-DiagnosticPlugins)) {
+foreach ($plugin in $plugins) {
   $requiredExports[$plugin] = @("Load", "PluginInterfaceVersion")
 }
 
@@ -138,12 +163,12 @@ Import-VisualStudioEnvironment
 if (-not $buildCommit) {
   $buildCommit = Get-BuildCommit
 }
-Write-BuildLog "Building commit $buildCommit for $game in the $architecture build"
+Write-BuildLog "Building commit $buildCommit for $buildTarget in the $architecture build"
 $diagnosticPluginNames = @(Get-DiagnosticPlugins | ForEach-Object { [System.IO.Path]::GetFileNameWithoutExtension($_) })
 Invoke-NativeStep "CMake configure" {
   & cmake.exe -S $PSScriptRoot -B $buildDirectory -G Ninja -DCMAKE_BUILD_TYPE=Release "-DankhPluginsBuildCommit=$buildCommit" "-DrootDirectory=$root" "-DbuildArchitecture=$architecture" "-DdiagnosticPlugins=$($diagnosticPluginNames -join ';')"
 }
-Invoke-NativeStep "CMake build" { & cmake.exe --build $buildDirectory --target $game }
+Invoke-NativeStep "CMake build" { & cmake.exe --build $buildDirectory --target $buildTarget }
 foreach ($fileName in $requiredExports.Keys) {
   Test-LibraryExport $fileName $requiredExports[$fileName]
   $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $binaryDirectory $fileName)).Hash.ToLowerInvariant()
