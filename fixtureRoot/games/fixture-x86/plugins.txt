@@ -5,3 +5,4 @@ echo.dll
 display-guard.dll
 frame-control.dll
 database-dao.dll
+memory-trim.dll
