@@ -1,16 +1,15 @@
 #include "direct3DMode.h"
 
+#include "fixtureReport.h"
+
 #include <initguid.h>
 #include <d3d9.h>
 
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 
-#include <cstdarg>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <string>
 
 struct Request {
   bool isFullscreen;
@@ -18,42 +17,13 @@ struct Request {
   UINT height;
 };
 
-static const char* const reportFileName = "fixtureReport.txt";
 static const long initialClientWidth = 640;
 static const long initialClientHeight = 480;
 static const unsigned long largestSize = 16384;
 static const int presentCount = 10;
 
-static FILE* report = nullptr;
 static HWND gameWindow = nullptr;
 static IDirect3DDevice9* device = nullptr;
-
-static void writeReport(const char* format, ...) {
-  va_list arguments;
-  va_start(arguments, format);
-  vfprintf(report, format, arguments);
-  va_end(arguments);
-  fputc('\n', report);
-  fflush(report);
-}
-
-static bool failStep(const char* step, unsigned long error) {
-  writeReport("failed step=%s error=0x%08lX", step, error);
-  return false;
-}
-
-static bool openReport() {
-  std::string path(MAX_PATH, '\0');
-  const DWORD length = GetModuleFileNameA(nullptr, path.data(), MAX_PATH);
-  if (length == 0 || length == MAX_PATH) {
-    return false;
-  }
-  path.resize(length);
-  path.resize(path.rfind('\\') + 1);
-  path += reportFileName;
-  report = fopen(path.c_str(), "w");
-  return report != nullptr;
-}
 
 static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wordParameter, LPARAM longParameter) {
   if (message == WM_SIZE) {
