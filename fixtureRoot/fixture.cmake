@@ -16,6 +16,8 @@ else()
 endif()
 # The Windows SDK's import library: the executable imports the system DLL, as a game does.
 target_link_libraries(${fixtureGame} PRIVATE ${gameLoader})
+# Its DAO mode asks ole32 for COM classes through its own imports, as a game built with DAO 3.5 does.
+target_link_libraries(${fixtureGame} PRIVATE ole32 oleaut32)
 # A game imports Direct3D 9 and DirectInput 8, or loads them itself after it starts, which a plugin sees as a
 # module load. A fixture game's game.cmake sets fixtureLoadsLibrariesAtRunTime for the second kind.
 if(fixtureLoadsLibrariesAtRunTime)

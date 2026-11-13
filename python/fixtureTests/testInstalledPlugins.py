@@ -33,7 +33,8 @@ class InstalledPluginsTest(unittest.TestCase):
     session = LoaderSession(self.process.processID)
     self.addCleanup(session.close)
     loaded, _ = session.plugins()
-    self.assertEqual(sorted(loaded), ["display-guard.dll", "display-report.dll", "echo.dll", "stability-guard.dll"])
+    self.assertEqual(sorted(loaded), ["database-dao.dll", "display-guard.dll", "display-report.dll", "echo.dll",
+      "stability-guard.dll"])
     loaderLog = sessionLog(self.game.pluginsFolder, "loader", self.process.processID, self.process.startedAt)
     self.assertEqual([line.fields for line in loaderLog if line.event == "pluginNotInstalled"], [{"plugin": absentPlugin}])
     self.assertEqual(sessionErrors(self.game.pluginsFolder, self.process.processID, self.process.startedAt), [])
