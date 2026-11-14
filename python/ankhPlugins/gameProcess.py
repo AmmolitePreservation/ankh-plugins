@@ -26,13 +26,13 @@ class GameProcess:
       raise GameError(f"process {processID} runs {actual}, not {expected}")
 
   @classmethod
-  def launch(cls, game, arguments):
+  def launch(cls, game, arguments, isActivated=False):
     if not game.executablePath.is_file():
       raise GameError(f"{game.executablePath} does not exist")
     running = windowsApi.processIDsNamed(game.executableName)
     if running:
       raise GameError(f"{game.executableName} is already running (process {', '.join(map(str, running))}); close it first")
-    processHandle, processID = windowsApi.startProcess(game.executablePath, arguments, game.executablePath.parent)
+    processHandle, processID = windowsApi.startProcess(game.executablePath, arguments, game.executablePath.parent, isActivated)
     try:
       return cls(game, processID, None)
     finally:

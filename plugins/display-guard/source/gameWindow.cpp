@@ -57,10 +57,13 @@ static ChangeDisplaySettingsExAFunction originalChangeDisplaySettingsExA = nullp
 static ChangeDisplaySettingsExWFunction originalChangeDisplaySettingsExW = nullptr;
 
 static std::string monitor;
+static bool isStartMinimized = false;
 static bool isStartupShowPending = false;
 static bool isForegroundRequestLogged = false;
 static bool isRestorePending = false;
+static bool isFrontPending = false;
 static UINT restoreMessage = 0;
+static UINT frontMessage = 0;
 static SRWLOCK stateLock = SRWLOCK_INIT;
 static GameWindow gameWindow = {};
 
@@ -157,8 +160,21 @@ static void eraseBars(HWND window, HDC deviceContext, const RECT& picture) {
   }
 }
 
+static void bringToFront(HWND window) {
+  isFrontPending = false;
+  writeLogLine("INFO", "foregroundOnStart result=%s", SetForegroundWindow(window) ? "done" : "refused");
+}
+
 static LRESULT CALLBACK gameWindowProcedure(HWND window, UINT message, WPARAM wordParameter, LPARAM longParameter) {
   const GameWindow game = currentGame();
+  if (message == frontMessage) {
+    bringToFront(window);
+    return 0;
+  }
+  if (message == WM_SHOWWINDOW && wordParameter != FALSE && isFrontPending && !PostMessageA(window, frontMessage, 0, 0)) {
+    isFrontPending = false;
+    writeLogLine("WARN", "foregroundOnStartNotPosted error=%lu", GetLastError());
+  }
   if (message == restoreMessage) {
     isRestorePending = false;
     if (!IsIconic(window)) {
@@ -228,7 +244,28 @@ static void logAdoption(HWND window) {
     IsWindowVisible(window) ? "true" : "false");
 }
 
-void adoptGameWindow(HWND window, UINT backBufferWidth, UINT backBufferHeight) {
+// Test and multi-client launchers start a game without activating it, as Windows' show command says.
+static bool isStartedWithoutActivation() {
+  STARTUPINFOW startup = {};
+  startup.cb = sizeof(startup);
+  GetStartupInfoW(&startup);
+  if ((startup.dwFlags & STARTF_USESHOWWINDOW) == 0) {
+    return false;
+  }
+  switch (startup.wShowWindow) {
+  case SW_HIDE:
+  case SW_SHOWMINIMIZED:
+  case SW_SHOWNOACTIVATE:
+  case SW_MINIMIZE:
+  case SW_SHOWMINNOACTIVE:
+  case SW_SHOWNA:
+    return true;
+  default:
+    return false;
+  }
+}
+
+void adoptGameWindow(HWND window, UINT backBufferWidth, UINT backBufferHeight, bool isFullscreenRequested) {
   if (window == nullptr) {
     fatalError("The game created a Direct3D device with no window to present into");
   }
@@ -258,6 +295,19 @@ void adoptGameWindow(HWND window, UINT backBufferWidth, UINT backBufferHeight) {
     isStartupShowPending = false;
     ShowWindow(window, SW_SHOWMINNOACTIVE);
     writeLogLine("INFO", "startupMinimized");
+  }
+  // An exclusive fullscreen device takes the foreground; the borderless window that replaces it takes it once, when
+  // it first shows. Windows still refuses it when the player has moved on to another window since starting the game.
+  if (isFullscreenRequested) {
+    if (isStartMinimized) {
+      writeLogLine("INFO", "foregroundOnStartSkipped reason=startMinimized");
+    } else if (isStartedWithoutActivation()) {
+      writeLogLine("INFO", "foregroundOnStartSkipped reason=startedWithoutActivation");
+    } else if (IsWindowVisible(window)) {
+      bringToFront(window);
+    } else {
+      isFrontPending = true;
+    }
   }
 }
 
@@ -413,9 +463,11 @@ static LONG WINAPI changeDisplaySettingsExWDetour(LPCWSTR device, DEVMODEW* mode
 
 void installGameWindowHooks(const Configuration& configuration) {
   monitor = configuration.monitor;
+  isStartMinimized = configuration.startMinimized;
   isStartupShowPending = configuration.startMinimized;
   restoreMessage = RegisterWindowMessageA("ankh-plugins.display-guard.restoreBorderless");
-  if (restoreMessage == 0) {
+  frontMessage = RegisterWindowMessageA("ankh-plugins.display-guard.bringToFront");
+  if (restoreMessage == 0 || frontMessage == 0) {
     fatalError("RegisterWindowMessageA failed (error %lu)", GetLastError());
   }
   unsigned hookedCount = 0;
