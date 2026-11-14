@@ -40,9 +40,9 @@ def nearestPixel(position, pixelCount):
 
 
 class DisplayGuardTest(Direct3DFixtureTest):
-  def launchGuarded(self, arguments, **settings):
+  def launchGuarded(self, arguments, isActivated=False, **settings):
     self.monitor = windowsApi.primaryMonitorSize()
-    self.launch(arguments, {"display-guard": settings})
+    self.launch(arguments, {"display-guard": settings}, isActivated)
 
   def picture(self, backBuffer):
     """Where display-guard presents the back buffer: its shape kept, unless the game replaces the placement with
@@ -158,6 +158,29 @@ class DisplayGuardTest(Direct3DFixtureTest):
     (modeChange,) = self.reported("displayModeChange")
     self.assertEqual(modeChange["result"], "0")
     self.assertTheWindowCoversTheMonitor()
+
+  def testAFullscreenGameStartedNormallyComesToTheFrontOnceItsWindowShows(self):
+    self.launchGuarded(["fullscreen"], isActivated=True)
+    (front,) = self.logged("display-guard", "foregroundOnStart")
+    # Windows decides: it refuses when the program that ran the test is not the foreground one.
+    self.assertIn(front["result"], ("done", "refused"))
+    self.assertEqual(self.logged("display-guard", "foregroundOnStartSkipped"), [])
+
+  def testAFullscreenGameStartedWithoutActivationStaysBehind(self):
+    self.launchGuarded(["fullscreen"])
+    self.assertEqual(self.logged("display-guard", "foregroundOnStartSkipped"), [{"reason": "startedWithoutActivation"}])
+    self.assertEqual(self.logged("display-guard", "foregroundOnStart"), [])
+    self.assertFalse(self.process.isForeground())
+
+  def testAFullscreenGameStartedMinimizedStaysBehind(self):
+    self.launchGuarded(["fullscreen"], isActivated=True, startMinimized="true")
+    self.assertEqual(self.logged("display-guard", "foregroundOnStartSkipped"), [{"reason": "startMinimized"}])
+    self.assertEqual(self.logged("display-guard", "foregroundOnStart"), [])
+
+  def testAWindowedGameKeepsItsOwnActivation(self):
+    self.launchGuarded(windowed, isActivated=True)
+    self.assertEqual(self.logged("display-guard", "foregroundOnStart"), [])
+    self.assertEqual(self.logged("display-guard", "foregroundOnStartSkipped"), [])
 
   def testStartMinimizedShowsTheGameMinimized(self):
     self.launchGuarded(windowed, startMinimized="true")

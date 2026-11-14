@@ -33,7 +33,7 @@ def size(fields, widthName="width", heightName="height"):
 
 
 class Direct3DFixtureTest(unittest.TestCase):
-  def launch(self, arguments, settings):
+  def launch(self, arguments, settings, isActivated=False):
     """Starts the game with "direct3D" and these arguments, each plugin's settings file holding the given values, and
     returns once its report ends with ready."""
     installed = Game(os.environ["ankhPluginsFixtureRoot"], os.environ["ankhPluginsFixtureGame"],
@@ -46,7 +46,7 @@ class Direct3DFixtureTest(unittest.TestCase):
     for pluginName, values in settings.items():
       lines = "".join(f"{key}={value}\n" for key, value in values.items())
       (self.game.pluginsFolder / f"{pluginName}.cfg").write_text(lines, encoding="ascii")
-    self.process = GameProcess.launch(self.game, ["direct3D", *arguments])
+    self.process = GameProcess.launch(self.game, ["direct3D", *arguments], isActivated)
     self.addCleanup(self.process.terminate, exitSeconds)
     waitForLoader(self.process)
     waitFor(lambda: {"ready", "failed"} & set(self.reportEvents()) or self.process.exitCode is not None, readySeconds,

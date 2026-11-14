@@ -13,7 +13,7 @@ void installGameWindowHooks(const Configuration& configuration);
 
 // Makes the window the game's main window, with the back buffer of the device just created for it. Fatal for a
 // child window, and for a second window while the first still exists.
-void adoptGameWindow(HWND window, UINT backBufferWidth, UINT backBufferHeight);
+void adoptGameWindow(HWND window, UINT backBufferWidth, UINT backBufferHeight, bool isFullscreenRequested);
 
 // Records a new back buffer size for the game's main window. Fatal for any other window.
 void setGameBackBuffer(HWND window, UINT width, UINT height);

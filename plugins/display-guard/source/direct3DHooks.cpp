@@ -174,7 +174,7 @@ static HRESULT STDMETHODCALLTYPE createDeviceDetour(IDirect3D9* direct3D, UINT a
   writeLogLine("INFO", "deviceAdapter adapter=%u deviceType=%d behaviorFlags=0x%08lX", adapter, deviceType, behaviorFlags);
   *parameters = applied;
   focusWindow = focus;
-  adoptGameWindow(presentWindow(applied), applied.BackBufferWidth, applied.BackBufferHeight);
+  adoptGameWindow(presentWindow(applied), applied.BackBufferWidth, applied.BackBufferHeight, requested.Windowed == FALSE);
   hookDevice(*device);
   return result;
 }

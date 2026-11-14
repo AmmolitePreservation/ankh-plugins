@@ -272,9 +272,13 @@ kernel32.CreateProcessW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, ctypes.c_
   wintypes.DWORD, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.POINTER(STARTUPINFOW), ctypes.POINTER(PROCESS_INFORMATION)]
 
 
-def startProcess(executablePath, arguments, workingFolder):
-  """Starts the program without activating its window; returns its process handle, which the caller closes, and its ID."""
-  startup = STARTUPINFOW(cb=ctypes.sizeof(STARTUPINFOW), dwFlags=startUseShowWindow, wShowWindow=showWithoutActivating)
+def startProcess(executablePath, arguments, workingFolder, isActivated=False):
+  """Starts the program, without activating its window unless isActivated (then as Explorer starts a program);
+  returns its process handle, which the caller closes, and its ID."""
+  if isActivated:
+    startup = STARTUPINFOW(cb=ctypes.sizeof(STARTUPINFOW))
+  else:
+    startup = STARTUPINFOW(cb=ctypes.sizeof(STARTUPINFOW), dwFlags=startUseShowWindow, wShowWindow=showWithoutActivating)
   information = PROCESS_INFORMATION()
   commandLine = ctypes.create_unicode_buffer(subprocess.list2cmdline([str(executablePath), *arguments]))
   if not kernel32.CreateProcessW(str(executablePath), commandLine, None, None, False, 0, None, str(workingFolder),
