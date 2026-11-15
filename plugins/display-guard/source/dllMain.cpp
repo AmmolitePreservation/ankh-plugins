@@ -1,6 +1,7 @@
 #include "configuration.h"
 #include "direct3DHooks.h"
 #include "fatalError.h"
+#include "gameSettings.h"
 #include "gammaHooks.h"
 #include "gameWindow.h"
 #include "hookRegistry.h"
@@ -49,6 +50,7 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
 
   initializeHookRegistry();
   initializePresentationPolicy(host);
+  prepareGameSettings(host, target);
   installGameWindowHooks(configuration);
   installDirect3DHooks(configuration);
   installInputHooks(configuration);
