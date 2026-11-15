@@ -121,8 +121,21 @@ class LoaderTest(unittest.TestCase):
     self.assertEqual([line.event for line in self.log("echo")],
       ["sessionStart", "loadComplete", "unloadComplete", "sessionStart", "loadComplete", "echoed"])
 
+  def teardownMarker(self):
+    return self.game.pluginsFolder / f"echo-teardown-{self.process.processID}.txt"
+
   def testQuitEndsTheGameThroughItsMessageLoop(self):
     self.assertEqual(self.session.command("quit"), {})
     self.assertTrue(windowsApi.waitForExit(self.process.handle, exitSeconds))
     self.assertEqual(self.process.exitCode, 0)
     self.assertEqual(self.errors(), [])
+
+  def testAnEndingGameLeavesThePluginsGlobalsInPlace(self):
+    self.assertEqual(self.session.command("quit"), {})
+    self.assertTrue(windowsApi.waitForExit(self.process.handle, exitSeconds))
+    self.assertFalse(self.teardownMarker().exists())
+
+  def testAReloadedPluginsGlobalsAreTornDown(self):
+    self.assertFalse(self.teardownMarker().exists())
+    self.assertEqual(self.session.reload("echo.dll"), 2)
+    self.assertTrue(self.teardownMarker().exists())

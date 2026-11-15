@@ -353,6 +353,15 @@ static LoadedPlugin loadPlugin(const std::string& fileName, unsigned long genera
   if (result != 0) {
     fatalError("%s Load returned %lu", fileName.c_str(), result);
   }
+  const PluginCompleteLoadFunction completeLoad =
+    reinterpret_cast<PluginCompleteLoadFunction>(GetProcAddress(module, "CompleteLoad"));
+  if (completeLoad == nullptr) {
+    fatalError("%s does not export CompleteLoad", fileName.c_str());
+  }
+  const DWORD completeResult = completeLoad();
+  if (completeResult != 0) {
+    fatalError("%s CompleteLoad returned %lu", fileName.c_str(), completeResult);
+  }
   const LoadedPlugin loaded = { fileName, generation, shadowPath, module,
     reinterpret_cast<PluginUnloadFunction>(GetProcAddress(module, "Unload")) };
   writeLogLine("INFO", "pluginLoaded name=%s generation=%lu reloadable=%s milliseconds=%lu", fileName.c_str(), generation,

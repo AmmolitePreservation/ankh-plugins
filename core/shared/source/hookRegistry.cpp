@@ -22,6 +22,13 @@ static const size_t hookedTargetCapacity = 64;
 static HookedTarget hookedTargets[hookedTargetCapacity];
 static size_t hookedTargetCount = 0;
 static bool isInitialized = false;
+// Hooks installed on the thread that initialized the registry wait to be enabled together (applyQueuedHooks): MinHook
+// suspends the process's other threads for every enabling, and finding them takes a snapshot of every thread on the
+// machine, tens of milliseconds a time on a busy PC. So a plugin's Load pays for one snapshot, not one a hook.
+static DWORD queueingThreadID = 0;
+static char queuedNames[hookedTargetCapacity][targetNameCapacity];
+static void* queuedAddresses[hookedTargetCapacity];
+static size_t queuedCount = 0;
 // Hooks are installed at load, as a module loads, and from inside hooked calls on the game's threads.
 static SRWLOCK registryLock = SRWLOCK_INIT;
 
@@ -58,6 +65,29 @@ void initializeHookRegistry() {
   }
   requireMinHookSuccess(MH_Initialize(), "initialize", "itself");
   isInitialized = true;
+  queueingThreadID = GetCurrentThreadId();
+}
+
+void applyQueuedHooks() {
+  if (!isInitialized) {
+    return;
+  }
+  AcquireSRWLockExclusive(&registryLock);
+  if (queueingThreadID != GetCurrentThreadId()) {
+    ReleaseSRWLockExclusive(&registryLock);
+    fatalError("applyQueuedHooks called on thread %lu, not the thread that initialized the hook registry or a second time",
+      GetCurrentThreadId());
+  }
+  if (queuedCount != 0) {
+    requireMinHookSuccess(MH_ApplyQueued(), "enable", "the queued hooks");
+  }
+  const size_t appliedCount = queuedCount;
+  queueingThreadID = 0;
+  queuedCount = 0;
+  ReleaseSRWLockExclusive(&registryLock);
+  for (size_t index = 0; index < appliedCount; index++) {
+    writeLogLine("INFO", "hookInstalled target=%s", queuedNames[index]);
+  }
 }
 
 void* resolveLoadedExport(const char* moduleName, const char* exportName) {
@@ -78,9 +108,17 @@ bool installHook(const char* targetName, void* target, void* detour, void** orig
   }
   AcquireSRWLockExclusive(&registryLock);
   const HookedTarget* const sharedWith = findTarget(target);
+  const bool isQueued = sharedWith == nullptr && queueingThreadID == GetCurrentThreadId();
   if (sharedWith == nullptr) {
     requireMinHookSuccess(MH_CreateHook(target, detour, original), "create the hook for", targetName);
-    requireMinHookSuccess(MH_EnableHook(target), "enable the hook for", targetName);
+    if (isQueued) {
+      requireMinHookSuccess(MH_QueueEnableHook(target), "queue the hook for", targetName);
+      strcpy(queuedNames[queuedCount], targetName);
+      queuedAddresses[queuedCount] = target;
+      queuedCount++;
+    } else {
+      requireMinHookSuccess(MH_EnableHook(target), "enable the hook for", targetName);
+    }
     rememberTarget(target, targetName);
   }
   ReleaseSRWLockExclusive(&registryLock);
@@ -88,7 +126,9 @@ bool installHook(const char* targetName, void* target, void* detour, void** orig
     writeLogLine("INFO", "hookShared target=%s sharedWith=%s", targetName, sharedWith->name);
     return false;
   }
-  writeLogLine("INFO", "hookInstalled target=%s", targetName);
+  if (!isQueued) {
+    writeLogLine("INFO", "hookInstalled target=%s", targetName);
+  }
   return true;
 }
 
@@ -104,6 +144,14 @@ void removeHook(void* target) {
   }
   strcpy(targetName, hookedTargets[index].name);
   requireMinHookSuccess(MH_RemoveHook(target), "remove the hook for", targetName);
+  for (size_t queued = 0; queued < queuedCount; queued++) {
+    if (queuedAddresses[queued] == target) {
+      queuedCount--;
+      queuedAddresses[queued] = queuedAddresses[queuedCount];
+      strcpy(queuedNames[queued], queuedNames[queuedCount]);
+      break;
+    }
+  }
   hookedTargets[index] = hookedTargets[hookedTargetCount - 1];
   hookedTargetCount--;
   ReleaseSRWLockExclusive(&registryLock);

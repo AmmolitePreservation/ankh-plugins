@@ -3,7 +3,7 @@
 #include <windows.h>
 
 // Changes with any change to this header that an already built plugin would not survive.
-const DWORD pluginHostInterfaceVersion = 1;
+const DWORD pluginHostInterfaceVersion = 2;
 
 // A plugin's handler for one control-pipe command: argument is the rest of the command's line. It writes its reply,
 // one line in the loader's ok/error form, into reply and returns the number of bytes written, at most replyCapacity,
@@ -14,6 +14,7 @@ typedef int (*PluginCommandFunction)(const char* argument, char* reply, int repl
 // What the loader hands each plugin's Load. Every plugin exports
 //   DWORD PluginInterfaceVersion(void)
 //   DWORD Load(const PluginHost* host)
+//   DWORD CompleteLoad(void)    called as Load returns; core/plugin defines it, and it enables the queued hooks
 // and a plugin that also exports
 //   DWORD Unload(void)
 // can be reloaded while the game runs: Unload removes everything the plugin installed, stops its
@@ -40,4 +41,5 @@ struct PluginHost {
 
 typedef DWORD (*PluginInterfaceVersionFunction)(void);
 typedef DWORD (*PluginLoadFunction)(const PluginHost* host);
+typedef DWORD (*PluginCompleteLoadFunction)();
 typedef DWORD (*PluginUnloadFunction)(void);

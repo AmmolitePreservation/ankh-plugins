@@ -134,6 +134,9 @@ static void runLoader() {
     initializeHookRegistry();
   }
   installPumpHooks(GetCurrentThreadId());
+  if (!isLateStart) {
+    applyQueuedHooks();
+  }
   const PluginHost host = { pluginsDirectory.c_str(), sessionStamp, GetCurrentThreadId(), &addPumpCallback,
     &removePumpCallback, &registerCommand };
   loadListedPlugins(host);
@@ -157,6 +160,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved
       isLateStart = true;
       initializeHookRegistry();
       installLateStart(&runLoader);
+      applyQueuedHooks();
     } else {
       installEntryPointHook(&runLoader);
     }

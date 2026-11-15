@@ -8,6 +8,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #ifndef ankhPluginsBuildCommit
 #error "ankhPluginsBuildCommit must be defined by the build (see build.ps1)"
@@ -26,6 +27,19 @@ static void (*removePumpCallback)(void (*callback)()) = nullptr;
 static volatile LONG pumpCount = 0;
 static volatile LONG lastPumpThreadID = 0;
 static const char* handlerGreeting = nullptr;
+
+// Leaves echo-teardown-<process ID>.txt in the ankh-plugins folder when the C runtime destroys the plugin's globals, so
+// the tests see that it does when the plugin is freed for a reload and not when the game ends.
+struct TeardownMarker {
+  std::string path;
+  ~TeardownMarker() {
+    const HANDLE file = CreateFileA(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+      CloseHandle(file);
+    }
+  }
+};
+static TeardownMarker teardownMarker;
 
 static void countPump() {
   InterlockedIncrement(&pumpCount);
@@ -93,6 +107,7 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
     host->mainThreadID);
   gameMainThreadID = host->mainThreadID;
   removePumpCallback = host->removePumpCallback;
+  teardownMarker.path = std::string(host->pluginDirectory) + "\\echo-teardown-" + std::to_string(GetCurrentProcessId()) + ".txt";
   handlerGreeting = loadHandlerGreeting(host->pluginDirectory);
   host->registerCommand("echo", &echoCommand);
   host->registerCommand("pumpCount", &pumpCountCommand);

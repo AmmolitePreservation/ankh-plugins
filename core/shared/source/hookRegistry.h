@@ -2,13 +2,18 @@
 
 #include <windows.h>
 
-// Owns MinHook initialization and remembers every hooked address.
+// Owns MinHook initialization and remembers every hooked address. Hooks installed afterwards on the same thread wait
+// for applyQueuedHooks, which enables them together; every other hook is enabled as it is installed.
 void initializeHookRegistry();
+
+// Enables the hooks waiting since initializeHookRegistry, on the thread that called it, once. A plugin's CompleteLoad
+// calls it when its Load returns; nothing when the registry was never initialized.
+void applyQueuedHooks();
 
 // Looks up an export in a module that is already loaded. Fatal when missing.
 void* resolveLoadedExport(const char* moduleName, const char* exportName);
 
-// Installs and enables an inline hook. Two names can resolve to one address
+// Installs and enables an inline hook (or queues it, see initializeHookRegistry). Two names can resolve to one address
 // when the compiler folds identical functions; the first hook already covers
 // that code, so the second name is logged as shared and false is returned.
 bool installHook(const char* targetName, void* target, void* detour, void** original);
