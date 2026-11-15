@@ -213,6 +213,45 @@ static bool reportWindowCalls() {
 }
 
 // Each call is undone only when it took effect, so a call a plugin held back is not answered with a second one.
+// A slightly darker ramp than the window's monitor's: Windows refuses one far from the identity. The monitor's own
+// ramp is put back if the change took.
+static bool reportGammaChange() {
+  MONITORINFOEXA monitor = {};
+  monitor.cbSize = sizeof(monitor);
+  if (!GetMonitorInfoA(MonitorFromWindow(gameWindow, MONITOR_DEFAULTTOPRIMARY), &monitor)) {
+    return failStep("getMonitorInfo", GetLastError());
+  }
+  HDC context = CreateDCA("DISPLAY", monitor.szDevice, nullptr, nullptr);
+  if (context == nullptr) {
+    return failStep("createMonitorContext", GetLastError());
+  }
+  WORD before[3][256] = {};
+  if (!GetDeviceGammaRamp(context, before)) {
+    DeleteDC(context);
+    return failStep("getDeviceGammaRamp", GetLastError());
+  }
+  WORD darker[3][256] = {};
+  for (int channel = 0; channel < 3; channel++) {
+    for (int step = 0; step < 256; step++) {
+      darker[channel][step] = static_cast<WORD>(before[channel][step] > 512 ? before[channel][step] - 512 : 0);
+    }
+  }
+  const BOOL changeResult = SetDeviceGammaRamp(context, darker);
+  WORD after[3][256] = {};
+  const BOOL readResult = GetDeviceGammaRamp(context, after);
+  const bool isChanged = readResult && memcmp(before, after, sizeof(before)) != 0;
+  const BOOL restoreResult = isChanged ? SetDeviceGammaRamp(context, before) : TRUE;
+  DeleteDC(context);
+  if (!readResult) {
+    return failStep("getDeviceGammaRamp", GetLastError());
+  }
+  if (!restoreResult) {
+    return failStep("restoreDeviceGammaRamp", GetLastError());
+  }
+  writeReport("gammaChange result=%d changed=%d", changeResult, isChanged);
+  return true;
+}
+
 static bool reportCursorCalls() {
   POINT positionBefore = {};
   if (!GetCursorPos(&positionBefore)) {
@@ -351,7 +390,7 @@ int runDirect3DMode(HINSTANCE instance, int argumentCount, char** arguments) {
     return 9;
   }
   ShowWindow(gameWindow, SW_SHOWNOACTIVATE);
-  if (!reportWindowCalls() || !reportCursorCalls() || !reportKeyboard(instance) || !reportPresents() || !resetDevice(request)
+  if (!reportWindowCalls() || !reportCursorCalls() || !reportGammaChange() || !reportKeyboard(instance) || !reportPresents() || !resetDevice(request)
       || (!request.isFullscreen && !reportWindowPlacement(request))) {
     return 9;
   }

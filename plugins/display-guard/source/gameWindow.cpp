@@ -11,10 +11,6 @@
 
 #include <string>
 
-typedef LONG (WINAPI* SetWindowLongFunction)(HWND, int, LONG);
-#ifdef _WIN64
-typedef LONG_PTR (WINAPI* SetWindowLongPtrFunction)(HWND, int, LONG_PTR);
-#endif
 typedef BOOL (WINAPI* SetWindowPosFunction)(HWND, HWND, int, int, int, int, UINT);
 typedef BOOL (WINAPI* GetClientRectFunction)(HWND, RECT*);
 typedef BOOL (WINAPI* ConvertPointFunction)(HWND, POINT*);
@@ -39,12 +35,6 @@ struct GameWindow {
   UINT backBufferHeight;
 };
 
-static SetWindowLongFunction originalSetWindowLongA = nullptr;
-static SetWindowLongFunction originalSetWindowLongW = nullptr;
-#ifdef _WIN64
-static SetWindowLongPtrFunction originalSetWindowLongPtrA = nullptr;
-static SetWindowLongPtrFunction originalSetWindowLongPtrW = nullptr;
-#endif
 static SetWindowPosFunction originalSetWindowPos = nullptr;
 static GetClientRectFunction originalGetClientRect = nullptr;
 static ConvertPointFunction originalClientToScreen = nullptr;
@@ -165,6 +155,20 @@ static void bringToFront(HWND window) {
   writeLogLine("INFO", "foregroundOnStart result=%s", SetForegroundWindow(window) ? "done" : "refused");
 }
 
+static void keepBorderless(int index, STYLESTRUCT* change) {
+  if (index != GWL_STYLE && index != GWL_EXSTYLE) {
+    return;
+  }
+  const LONG requested = static_cast<LONG>(change->styleNew);
+  const LONG applied = index == GWL_STYLE ? borderlessStyle(requested) : borderlessExtendedStyle(requested);
+  if (applied == requested) {
+    return;
+  }
+  change->styleNew = static_cast<DWORD>(applied);
+  writeLogLine("INFO", "gameWindowRestyled index=%d requested=0x%08lX applied=0x%08lX", index,
+    static_cast<unsigned long>(requested), static_cast<unsigned long>(applied));
+}
+
 static LRESULT CALLBACK gameWindowProcedure(HWND window, UINT message, WPARAM wordParameter, LPARAM longParameter) {
   const GameWindow game = currentGame();
   if (message == frontMessage) {
@@ -181,6 +185,11 @@ static LRESULT CALLBACK gameWindowProcedure(HWND window, UINT message, WPARAM wo
       placeBorderless(window, monitor);
     }
     return 0;
+  }
+  // The style is kept borderless here rather than where the game calls SetWindowLong, so a library the game loads,
+  // whose calls display-guard does not see, cannot give the window a frame either.
+  if (message == WM_STYLECHANGING) {
+    keepBorderless(static_cast<int>(wordParameter), reinterpret_cast<STYLESTRUCT*>(longParameter));
   }
   // Placement is posted rather than done here: resizing inside the game's own size handling can reenter it.
   if (message == WM_SIZE && wordParameter != SIZE_MINIMIZED && !isRestorePending) {
@@ -328,35 +337,6 @@ void setGameBackBuffer(HWND window, UINT width, UINT height) {
   writeLogLine("INFO", "gameWindowMapped backBufferWidth=%u backBufferHeight=%u", width, height);
 }
 
-static LONG_PTR permittedWindowLong(HWND window, int index, LONG_PTR value) {
-  if ((index != GWL_STYLE && index != GWL_EXSTYLE) || !isGameWindow(window)) {
-    return value;
-  }
-  const LONG requested = static_cast<LONG>(value);
-  const LONG applied = index == GWL_STYLE ? borderlessStyle(requested) : borderlessExtendedStyle(requested);
-  writeLogLine("INFO", "gameWindowRestyled index=%d requested=0x%08lX applied=0x%08lX", index,
-    static_cast<unsigned long>(requested), static_cast<unsigned long>(applied));
-  return applied;
-}
-
-static LONG WINAPI setWindowLongADetour(HWND window, int index, LONG value) {
-  return originalSetWindowLongA(window, index, static_cast<LONG>(permittedWindowLong(window, index, value)));
-}
-
-static LONG WINAPI setWindowLongWDetour(HWND window, int index, LONG value) {
-  return originalSetWindowLongW(window, index, static_cast<LONG>(permittedWindowLong(window, index, value)));
-}
-
-#ifdef _WIN64
-static LONG_PTR WINAPI setWindowLongPtrADetour(HWND window, int index, LONG_PTR value) {
-  return originalSetWindowLongPtrA(window, index, permittedWindowLong(window, index, value));
-}
-
-static LONG_PTR WINAPI setWindowLongPtrWDetour(HWND window, int index, LONG_PTR value) {
-  return originalSetWindowLongPtrW(window, index, permittedWindowLong(window, index, value));
-}
-#endif
-
 // Where the window is and how large is display-guard's; whether it is shown stays the game's.
 static BOOL WINAPI setWindowPosDetour(HWND window, HWND insertAfter, int left, int top, int width, int height, UINT flags) {
   if (!isGameWindow(window)) {
@@ -478,12 +458,6 @@ void installGameWindowHooks(const Configuration& configuration) {
   hookedCount += hookUser32("ChangeDisplaySettingsW", &changeDisplaySettingsWDetour, &originalChangeDisplaySettingsW);
   hookedCount += hookUser32("ChangeDisplaySettingsExA", &changeDisplaySettingsExADetour, &originalChangeDisplaySettingsExA);
   hookedCount += hookUser32("ChangeDisplaySettingsExW", &changeDisplaySettingsExWDetour, &originalChangeDisplaySettingsExW);
-  hookedCount += hookUser32("SetWindowLongA", &setWindowLongADetour, &originalSetWindowLongA);
-  hookedCount += hookUser32("SetWindowLongW", &setWindowLongWDetour, &originalSetWindowLongW);
-#ifdef _WIN64
-  hookedCount += hookUser32("SetWindowLongPtrA", &setWindowLongPtrADetour, &originalSetWindowLongPtrA);
-  hookedCount += hookUser32("SetWindowLongPtrW", &setWindowLongPtrWDetour, &originalSetWindowLongPtrW);
-#endif
   hookedCount += hookUser32("SetWindowPos", &setWindowPosDetour, &originalSetWindowPos);
   hookedCount += hookUser32("GetClientRect", &getClientRectDetour, &originalGetClientRect);
   hookedCount += hookUser32("ClientToScreen", &clientToScreenDetour, &originalClientToScreen);

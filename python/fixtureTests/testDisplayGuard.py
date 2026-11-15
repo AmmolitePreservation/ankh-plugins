@@ -19,7 +19,7 @@ styleFrame = 0x00C00000 | 0x00040000 | 0x00080000 | 0x00020000 | 0x00010000 | 0x
 requestedCooperativeLevel = "0x15"
 releasedCooperativeLevel = "0x06"
 
-importedByTheFixture = ["ChangeDisplaySettingsA", "SetWindowLongA", "SetWindowPos", "GetClientRect", "ClientToScreen",
+importedByTheFixture = ["ChangeDisplaySettingsA", "SetWindowPos", "GetClientRect", "ClientToScreen",
   "ScreenToClient", "SetForegroundWindow", "SetCursorPos", "ClipCursor"]
 
 
@@ -211,6 +211,11 @@ class DisplayGuardTest(Direct3DFixtureTest):
     for event in ("inputReleased", "cursorMoveIgnored", "cursorClipIgnored", "cooperativeLevelSet"):
       with self.subTest(event=event):
         self.assertNotIn(event, events)
+
+  def testTheGameCannotChangeTheMonitorsGamma(self):
+    self.launchGuarded(windowed)
+    self.assertEqual(self.reported("gammaChange"), [{"result": "1", "changed": "0"}])
+    self.assertEqual([line.event for line in self.log("display-guard")].count("gammaChangeIgnored"), 1)
 
   def testOnlyTheFunctionsTheGameImportsAreHooked(self):
     self.launchGuarded(windowed)
