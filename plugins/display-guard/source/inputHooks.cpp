@@ -1,6 +1,8 @@
 #include "inputHooks.h"
 
+#include "fatalError.h"
 #include "gameForeground.h"
+#include "gameWindow.h"
 #include "methodTable.h"
 #include "moduleWatch.h"
 #include "sessionLog.h"
@@ -29,6 +31,10 @@ static SetCursorPosFunction originalSetCursorPos = nullptr;
 static ClipCursorFunction originalClipCursor = nullptr;
 static GetAsyncKeyStateFunction originalGetAsyncKeyState = nullptr;
 
+static bool isInputReleased = false;
+static bool isConfinementWanted = false;
+static bool isConfining = false;
+static RECT confinement = {};
 static bool isCursorMoveLogged = false;
 static bool isCursorClipLogged = false;
 
@@ -92,9 +98,66 @@ static BOOL WINAPI setCursorPosDetour(int x, int y) {
   return TRUE;
 }
 
-// The clip is left as it is rather than released: it belongs to whichever application is active.
+static BOOL confineToWindow(HWND window) {
+  RECT rectangle = {};
+  if (!GetWindowRect(window, &rectangle)) {
+    fatalError("GetWindowRect failed for the game's window (error %lu)", GetLastError());
+  }
+  const BOOL result = originalClipCursor(&rectangle);
+  if (!result) {
+    writeLogLine("WARN", "cursorConfinementRefused error=%lu", GetLastError());
+    return result;
+  }
+  if (!isConfining || !EqualRect(&rectangle, &confinement)) {
+    writeLogLine("INFO", "cursorConfined left=%ld top=%ld right=%ld bottom=%ld", rectangle.left, rectangle.top, rectangle.right,
+      rectangle.bottom);
+  }
+  isConfining = true;
+  confinement = rectangle;
+  return result;
+}
+
+// The confinement is let go only while it is still the one display-guard set: the window now active may have set its own.
+static void releaseConfinement() {
+  isConfining = false;
+  RECT current = {};
+  if (!GetClipCursor(&current)) {
+    fatalError("GetClipCursor failed (error %lu)", GetLastError());
+  }
+  if (!EqualRect(&current, &confinement)) {
+    writeLogLine("INFO", "cursorConfinementLeft left=%ld top=%ld right=%ld bottom=%ld", current.left, current.top, current.right,
+      current.bottom);
+    return;
+  }
+  if (!originalClipCursor(nullptr)) {
+    writeLogLine("WARN", "cursorReleaseRefused error=%lu", GetLastError());
+    return;
+  }
+  writeLogLine("INFO", "cursorReleased");
+}
+
+void updateCursorConfinement(HWND window, bool isActive) {
+  if (!isConfinementWanted) {
+    return;
+  }
+  if (isActive) {
+    confineToWindow(window);
+  } else if (isConfining) {
+    releaseConfinement();
+  }
+}
+
+// A game's own confinement is kept while it is in front; its release then confines the cursor to its window again. In the
+// background its confinement is ignored rather than released: the clip belongs to whichever application is active.
 static BOOL WINAPI clipCursorDetour(const RECT* rectangle) {
-  if (rectangle == nullptr || isGameInForeground()) {
+  const bool isInFront = isGameInForeground();
+  HWND window = nullptr;
+  UINT width = 0;
+  UINT height = 0;
+  if (rectangle == nullptr && isInFront && isConfinementWanted && gameBackBuffer(&window, &width, &height)) {
+    return confineToWindow(window);
+  }
+  if (rectangle == nullptr || isInFront || !isInputReleased) {
     return originalClipCursor(rectangle);
   }
   if (!isCursorClipLogged) {
@@ -110,13 +173,23 @@ static SHORT WINAPI getAsyncKeyStateDetour(int key) {
 }
 
 void installInputHooks(const Configuration& configuration) {
-  if (!configuration.releaseInput) {
+  isInputReleased = configuration.releaseInput;
+  isConfinementWanted = configuration.confineCursor;
+  // display-guard's own confinement calls the real ClipCursor whether or not the game imports it.
+  originalClipCursor = reinterpret_cast<ClipCursorFunction>(reinterpret_cast<void*>(GetProcAddress(GetModuleHandleA("user32.dll"),
+    "ClipCursor")));
+  if (originalClipCursor == nullptr) {
+    fatalError("user32.dll has no ClipCursor");
+  }
+  if (isInputReleased || isConfinementWanted) {
+    hookUser32("ClipCursor", &clipCursorDetour, &originalClipCursor);
+  }
+  if (!isInputReleased) {
     writeLogLine("INFO", "inputLeftToTheGame");
     return;
   }
   whenModuleLoads("dinput8.dll", &hookDirectInput8Create);
   hookUser32("SetCursorPos", &setCursorPosDetour, &originalSetCursorPos);
-  hookUser32("ClipCursor", &clipCursorDetour, &originalClipCursor);
   hookUser32("GetAsyncKeyState", &getAsyncKeyStateDetour, &originalGetAsyncKeyState);
   writeLogLine("INFO", "inputReleased");
 }
