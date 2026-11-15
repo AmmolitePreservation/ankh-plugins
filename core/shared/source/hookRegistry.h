@@ -13,6 +13,11 @@ void* resolveLoadedExport(const char* moduleName, const char* exportName);
 // that code, so the second name is logged as shared and false is returned.
 bool installHook(const char* targetName, void* target, void* detour, void** original);
 
+// Takes back the hook installHook put at target, restoring the code there: for a module the game frees, before Windows
+// unmaps it (watchModuleLoads), so the same address can be hooked again when the module is loaded again. Fatal when
+// no hook is there.
+void removeHook(void* target);
+
 // installHook on an export of a loaded module, named <module>!<export> with the module's name lacking ".dll".
 bool installExportHook(const char* moduleName, const char* exportName, void* detour, void** original);
 
