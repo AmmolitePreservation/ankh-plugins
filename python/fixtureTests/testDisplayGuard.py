@@ -19,7 +19,7 @@ styleFrame = 0x00C00000 | 0x00040000 | 0x00080000 | 0x00020000 | 0x00010000 | 0x
 requestedCooperativeLevel = "0x15"
 releasedCooperativeLevel = "0x06"
 
-importedByTheFixture = ["ChangeDisplaySettingsA", "SetWindowLongA", "SetWindowPos", "GetClientRect", "ClientToScreen",
+importedByTheFixture = ["ChangeDisplaySettingsA", "SetWindowPos", "GetClientRect", "ClientToScreen",
   "ScreenToClient", "SetForegroundWindow", "SetCursorPos", "ClipCursor"]
 
 
@@ -127,9 +127,16 @@ class DisplayGuardTest(Direct3DFixtureTest):
     self.assertEqual(placement, {"moveResult": "1", "hidden": "1", "showResult": "1", "shown": "1",
       "style": f"0x{self.borderlessStyle() | styleVisible:08X}", "left": "0", "top": "0", "width": str(self.monitor[0]),
       "height": str(self.monitor[1])})
-    (restyled,) = self.logged("display-guard", "gameWindowRestyled")
-    self.assertEqual(restyled["applied"], f"0x{self.borderlessStyle() | styleVisible:08X}")
+    restyled = self.logged("display-guard", "gameWindowRestyled")
+    self.assertEqual([entry["applied"] for entry in restyled], [f"0x{self.borderlessStyle() | styleVisible:08X}"] * 2)
     self.assertEqual(len(self.logged("display-guard", "gameWindowMoveReplaced")), 2)
+    self.assertTheWindowCoversTheMonitor()
+
+  def testALibraryThatTakesTheWindowOverAndGivesItBackLeavesDisplayGuardInCharge(self):
+    self.launchGuarded(windowed, renderResolution="game")
+    self.assertEqual(self.reported("loginScreensEnded"), [{"messages": "1",
+      "style": f"0x{self.borderlessStyle() | styleVisible:08X}"}])
+    self.assertEqual(self.logged("display-guard", "gameWindowProcedureBeneath"), [{"unicode": "false"}])
     self.assertTheWindowCoversTheMonitor()
 
   def testTheGameKeepsItsSizeWhenItsWindowIsMinimizedAndRestored(self):
@@ -211,6 +218,11 @@ class DisplayGuardTest(Direct3DFixtureTest):
     for event in ("inputReleased", "cursorMoveIgnored", "cursorClipIgnored", "cooperativeLevelSet"):
       with self.subTest(event=event):
         self.assertNotIn(event, events)
+
+  def testTheGameCannotChangeTheMonitorsGamma(self):
+    self.launchGuarded(windowed)
+    self.assertEqual(self.reported("gammaChange"), [{"result": "1", "changed": "0"}])
+    self.assertEqual([line.event for line in self.log("display-guard")].count("gammaChangeIgnored"), 1)
 
   def testOnlyTheFunctionsTheGameImportsAreHooked(self):
     self.launchGuarded(windowed)
