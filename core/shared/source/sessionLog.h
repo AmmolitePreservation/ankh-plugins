@@ -13,18 +13,16 @@ void removeExpiredLogs(const std::string& logDirectory, const std::string& logFi
 
 // Opens logs\<pluginName>\<pluginName>_<sessionStamp>_pid<processID>.log for this game session,
 // appending when a reloaded plugin reopens it, then removes that plugin's session logs past
-// the retention period.
+// the retention period. The file is open only while a line is written, so other programs can read and copy it.
 void openSessionLog(const std::string& pluginDirectory, const char* pluginName, const char* sessionStamp);
 
-// Closes the session log, for a plugin that is being unloaded.
+// Ends the session log, for a plugin that is being unloaded.
 void closeSessionLog();
 
-// Writes one timestamped line. Terminates the process if the write fails.
+// Writes one timestamped line; while a reader holds the file shut for writing, the line waits and goes with the next
+// one (past 1 MB waiting, lines are counted and the count is logged). Terminates the process if the write fails.
 void writeLogLine(const char* level, const char* format, ...);
 
 // Writes one timestamped line with a preformatted message. Returns false when
 // no log is open or the write fails. Only fatalError should need this.
 bool tryWriteLogLine(const char* level, const char* message);
-
-// Lets the WriteFile hook recognize this DLL's own log writes and leave them untimed.
-bool isSessionLogHandle(HANDLE handle);

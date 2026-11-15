@@ -42,6 +42,7 @@ static int formatReply(char* reply, int replyCapacity, const char* format, ...) 
 }
 
 static int echoCommand(const char* argument, char* reply, int replyCapacity) {
+  writeLogLine("INFO", "echoed text=%s", argument);
   return formatReply(reply, replyCapacity, "ok text=%s", argument);
 }
 

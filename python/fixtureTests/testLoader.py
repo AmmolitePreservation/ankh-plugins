@@ -8,7 +8,7 @@ from ankhPlugins import windowsApi
 from ankhPlugins.gameProcess import GameProcess, waitFor
 from ankhPlugins.games import Game
 from ankhPlugins.linePipe import LoaderSession, PipeCommandError
-from ankhPlugins.pluginLogs import sessionErrors, sessionLog
+from ankhPlugins.pluginLogs import sessionErrors, sessionLog, sessionLogPath
 from ankhPlugins.session import waitForLoader
 
 pumpSeconds = 10
@@ -58,6 +58,14 @@ class LoaderTest(unittest.TestCase):
     self.assertEqual(self.session.command("echo", "two words"), {"text": "two words"})
     self.assertEqual(self.session.sendLine("echo a b  c"), "ok text=a b  c")
     self.assertEqual(self.session.sendLine("echo"), "ok text=")
+
+  def testALogReadWithoutSharingWritesKeepsEveryLineInOrder(self):
+    path = sessionLogPath(self.game.pluginsFolder, "echo", self.process.processID, self.process.startedAt)
+    with windowsApi.openedForReadingOnly(path):
+      self.assertEqual(self.session.command("echo", "held"), {"text": "held"})
+    self.assertEqual(self.session.command("echo", "released"), {"text": "released"})
+    echoed = [line.fields["text"] for line in self.log("echo") if line.event == "echoed"]
+    self.assertEqual(echoed, ["held", "released"])
 
   def testPumpCallbacksRunOnTheGameMainThread(self):
     countBefore = self.pumpCount()
@@ -111,7 +119,7 @@ class LoaderTest(unittest.TestCase):
     registered = [line.fields["name"] for line in loaderLines if line.event == "commandRegistered" and line.fields["plugin"] == "echo.dll"]
     self.assertEqual(registered, echoCommands * 2)
     self.assertEqual([line.event for line in self.log("echo")],
-      ["sessionStart", "loadComplete", "unloadComplete", "sessionStart", "loadComplete"])
+      ["sessionStart", "loadComplete", "unloadComplete", "sessionStart", "loadComplete", "echoed"])
 
   def testQuitEndsTheGameThroughItsMessageLoop(self):
     self.assertEqual(self.session.command("quit"), {})

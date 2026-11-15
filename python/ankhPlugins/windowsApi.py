@@ -1,4 +1,5 @@
 """The few Win32 calls the client needs, through ctypes."""
+import contextlib
 import ctypes
 import subprocess
 from ctypes import wintypes
@@ -36,6 +37,12 @@ user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM, wintypes.UINT,
   wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
 kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+kernel32.CreateFileW.restype = wintypes.HANDLE
+kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+  wintypes.DWORD, wintypes.HANDLE]
+genericRead = 0x80000000
+fileShareRead = 0x00000001
+openExisting = 3
 
 
 class PROCESSENTRY32W(ctypes.Structure):
@@ -286,3 +293,15 @@ def startProcess(executablePath, arguments, workingFolder, isActivated=False):
     raiseLastError(f"CreateProcessW({executablePath})")
   closeHandle(information.hThread)
   return information.hProcess, information.dwProcessId
+
+
+@contextlib.contextmanager
+def openedForReadingOnly(path):
+  """Holds path open for reading and shares only reading, as most zip tools do: nobody may write it meanwhile."""
+  handle = kernel32.CreateFileW(str(path), genericRead, fileShareRead, None, openExisting, 0, None)
+  if handle == invalidHandle:
+    raiseLastError(f"CreateFileW of {path}")
+  try:
+    yield
+  finally:
+    kernel32.CloseHandle(handle)
