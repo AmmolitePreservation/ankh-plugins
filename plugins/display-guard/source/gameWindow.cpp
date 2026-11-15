@@ -3,6 +3,7 @@
 #include "fatalError.h"
 #include "gameForeground.h"
 #include "hookRegistry.h"
+#include "inputHooks.h"
 #include "presentationPolicy.h"
 #include "sessionLog.h"
 #include "user32Hook.h"
@@ -198,6 +199,9 @@ static LRESULT CALLBACK gameWindowProcedure(HWND window, UINT message, WPARAM wo
     isRestorePending = false;
     if (!IsIconic(window)) {
       placeBorderless(window, monitor);
+      if (isGameInForeground()) {
+        updateCursorConfinement(window, true);
+      }
     }
     return 0;
   }
@@ -225,8 +229,13 @@ static LRESULT CALLBACK gameWindowProcedure(HWND window, UINT message, WPARAM wo
     longParameter = MAKELPARAM(static_cast<WORD>(nearestPixel(mapped.x, letterbox.backBufferWidth)),
       static_cast<WORD>(nearestPixel(mapped.y, letterbox.backBufferHeight)));
   }
-  return game.isUnicode ? CallWindowProcW(game.procedure, window, message, wordParameter, longParameter)
+  const LRESULT result = game.isUnicode ? CallWindowProcW(game.procedure, window, message, wordParameter, longParameter)
     : CallWindowProcA(game.procedure, window, message, wordParameter, longParameter);
+  // After the game's own handling, so a game that confines or releases the cursor as it is activated does not undo it.
+  if (message == WM_ACTIVATEAPP) {
+    updateCursorConfinement(window, wordParameter != FALSE);
+  }
+  return result;
 }
 
 enum class Subclassing { done, secondWindow, failed };

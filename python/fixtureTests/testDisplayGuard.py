@@ -19,6 +19,9 @@ styleFrame = 0x00C00000 | 0x00040000 | 0x00080000 | 0x00020000 | 0x00010000 | 0x
 requestedCooperativeLevel = "0x15"
 releasedCooperativeLevel = "0x06"
 
+confinementEvents = {"cursorConfined", "cursorReleased", "cursorConfinementLeft", "cursorConfinementRefused",
+  "cursorReleaseRefused"}
+
 importedByTheFixture = ["ChangeDisplaySettingsA", "SetWindowPos", "GetClientRect", "ClientToScreen",
   "ScreenToClient", "SetForegroundWindow", "SetCursorPos", "ClipCursor"]
 
@@ -218,6 +221,28 @@ class DisplayGuardTest(Direct3DFixtureTest):
     for event in ("inputReleased", "cursorMoveIgnored", "cursorClipIgnored", "cooperativeLevelSet"):
       with self.subTest(event=event):
         self.assertNotIn(event, events)
+
+  def testConfineCursorKeepsTheCursorInTheActiveGamesWindowAndLetsItGoAfter(self):
+    self.launchGuarded(windowed, confineCursor="true")
+    window = self.gameWindow()
+    free = windowsApi.virtualScreen()
+    self.assertEqual(windowsApi.cursorClip(), free)
+    windowsApi.sendActivation(window, True)
+    self.addCleanup(windowsApi.sendActivation, window, False)
+    self.assertEqual(windowsApi.cursorClip(), (0, 0, *self.monitor))
+    windowsApi.sendActivation(window, False)
+    self.assertEqual(windowsApi.cursorClip(), free)
+    self.assertEqual([(line.event, line.fields) for line in self.log("display-guard") if line.event in confinementEvents],
+      [("cursorConfined", {"left": "0", "top": "0", "right": str(self.monitor[0]),
+      "bottom": str(self.monitor[1])}), ("cursorReleased", {})])
+
+  def testWithoutConfineCursorTheActiveGamesCursorStaysFree(self):
+    self.launchGuarded(windowed)
+    window = self.gameWindow()
+    windowsApi.sendActivation(window, True)
+    self.assertEqual(windowsApi.cursorClip(), windowsApi.virtualScreen())
+    windowsApi.sendActivation(window, False)
+    self.assertNotIn("cursorConfined", [line.event for line in self.log("display-guard")])
 
   def testTheGameCannotChangeTheMonitorsGamma(self):
     self.launchGuarded(windowed)

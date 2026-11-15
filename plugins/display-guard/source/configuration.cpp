@@ -11,6 +11,7 @@ Configuration loadConfiguration(const std::string& pluginDirectory) {
     { "renderResolution", SettingKind::text, &renderResolution, false },
     { "startMinimized", SettingKind::boolean, &configuration.startMinimized, false },
     { "releaseInput", SettingKind::boolean, &configuration.releaseInput, false },
+    { "confineCursor", SettingKind::boolean, &configuration.confineCursor, false },
   };
   loadSettingsFile(pluginDirectory, "display-guard.cfg", definitions, sizeof(definitions) / sizeof(definitions[0]));
   if (renderResolution == "native") {

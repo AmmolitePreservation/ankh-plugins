@@ -9,6 +9,7 @@ struct Configuration {
   RenderResolution renderResolution;
   bool startMinimized;
   bool releaseInput;
+  bool confineCursor;
 };
 
 // Reads display-guard.cfg from the ankh-plugins folder. Any problem is fatal.

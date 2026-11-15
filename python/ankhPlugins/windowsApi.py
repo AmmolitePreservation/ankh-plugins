@@ -10,13 +10,19 @@ kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 windowMessageClose = 0x0010
 windowMessageGetText = 0x000D
 windowMessageMouseMove = 0x0200
+windowMessageActivateApp = 0x001C
 windowLongStyle = -16
 systemMetricScreenWidth = 0
 systemMetricScreenHeight = 1
+systemMetricVirtualScreenLeft = 76
+systemMetricVirtualScreenTop = 77
+systemMetricVirtualScreenWidth = 78
+systemMetricVirtualScreenHeight = 79
 showMinimizedWithoutActivating = 7
 sendMessageAbortIfHung = 0x0002
 controlTextMilliseconds = 2000
 controlTextCapacity = 4096
+messageMilliseconds = 5000
 dialogClass = "#32770"
 staticClass = "Static"
 snapshotProcesses = 0x00000002
@@ -32,6 +38,7 @@ user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetClipCursor.argtypes = [ctypes.POINTER(wintypes.RECT)]
 user32.EnumChildWindows.argtypes = [wintypes.HWND, enumWindowsProcedure, wintypes.LPARAM]
 user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM, wintypes.UINT,
@@ -170,6 +177,30 @@ def postMouseMove(window, x, y):
 
 def primaryMonitorSize():
   return (user32.GetSystemMetrics(systemMetricScreenWidth), user32.GetSystemMetrics(systemMetricScreenHeight))
+
+
+def virtualScreen():
+  """(left, top, right, bottom) of the rectangle around every monitor."""
+  left = user32.GetSystemMetrics(systemMetricVirtualScreenLeft)
+  top = user32.GetSystemMetrics(systemMetricVirtualScreenTop)
+  return (left, top, left + user32.GetSystemMetrics(systemMetricVirtualScreenWidth),
+    top + user32.GetSystemMetrics(systemMetricVirtualScreenHeight))
+
+
+def cursorClip():
+  """(left, top, right, bottom) the cursor is confined to: the virtual screen while it is free."""
+  rectangle = wintypes.RECT()
+  if not user32.GetClipCursor(ctypes.byref(rectangle)):
+    raiseLastError("GetClipCursor")
+  return (rectangle.left, rectangle.top, rectangle.right, rectangle.bottom)
+
+
+def sendActivation(window, isActive):
+  """Sends the window WM_ACTIVATEAPP, as Windows does when its application becomes or stops being the active one."""
+  result = ctypes.c_size_t()
+  if not user32.SendMessageTimeoutW(window, windowMessageActivateApp, int(isActive), 0, sendMessageAbortIfHung,
+      messageMilliseconds, ctypes.byref(result)):
+    raiseLastError("SendMessageTimeoutW")
 
 
 def foregroundProcessID():
