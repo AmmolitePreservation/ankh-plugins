@@ -2,6 +2,7 @@
 
 #include "fatalError.h"
 #include "gameForeground.h"
+#include "hookRegistry.h"
 #include "presentationPolicy.h"
 #include "sessionLog.h"
 #include "user32Hook.h"
@@ -11,6 +12,16 @@
 
 #include <string>
 
+// The window procedure is read and set through SetWindowLongPtr, which a 32-bit user32 exports as SetWindowLong.
+#ifdef _WIN64
+typedef LONG_PTR WindowLong;
+#define windowLongName(name) name "Ptr"
+#else
+typedef LONG WindowLong;
+#define windowLongName(name) name
+#endif
+typedef WindowLong (WINAPI* SetWindowLongFunction)(HWND, int, WindowLong);
+typedef WindowLong (WINAPI* GetWindowLongFunction)(HWND, int);
 typedef BOOL (WINAPI* SetWindowPosFunction)(HWND, HWND, int, int, int, int, UINT);
 typedef BOOL (WINAPI* GetClientRectFunction)(HWND, RECT*);
 typedef BOOL (WINAPI* ConvertPointFunction)(HWND, POINT*);
@@ -35,6 +46,10 @@ struct GameWindow {
   UINT backBufferHeight;
 };
 
+static SetWindowLongFunction originalSetWindowLongA = nullptr;
+static SetWindowLongFunction originalSetWindowLongW = nullptr;
+static GetWindowLongFunction originalGetWindowLongA = nullptr;
+static GetWindowLongFunction originalGetWindowLongW = nullptr;
 static SetWindowPosFunction originalSetWindowPos = nullptr;
 static GetClientRectFunction originalGetClientRect = nullptr;
 static ConvertPointFunction originalClientToScreen = nullptr;
@@ -225,9 +240,9 @@ static Subclassing subclassGameWindow(HWND window, DWORD* error) {
     outcome = Subclassing::secondWindow;
   } else {
     const bool isUnicode = IsWindowUnicode(window) != FALSE;
-    const LONG_PTR replacement = reinterpret_cast<LONG_PTR>(&gameWindowProcedure);
-    const LONG_PTR previous = isUnicode ? SetWindowLongPtrW(window, GWLP_WNDPROC, replacement)
-      : SetWindowLongPtrA(window, GWLP_WNDPROC, replacement);
+    const WindowLong replacement = reinterpret_cast<WindowLong>(&gameWindowProcedure);
+    const WindowLong previous = isUnicode ? originalSetWindowLongW(window, GWLP_WNDPROC, replacement)
+      : originalSetWindowLongA(window, GWLP_WNDPROC, replacement);
     if (previous == 0) {
       *error = GetLastError();
       outcome = Subclassing::failed;
@@ -335,6 +350,59 @@ void setGameBackBuffer(HWND window, UINT width, UINT height) {
     fatalError("The Direct3D device presents into a window that is not the game's main window");
   }
   writeLogLine("INFO", "gameWindowMapped backBufferWidth=%u backBufferHeight=%u", width, height);
+}
+
+// A procedure any module puts on the game window goes beneath display-guard's, which stays the window's own, and the
+// caller gets back the one it replaces there; reading the procedure gives that one too. So a library that saves the
+// window's procedure and puts it back when it is done, as a game's login screens can, never takes display-guard out.
+static bool setProcedureBeneath(HWND window, WindowLong value, bool isUnicode, WindowLong* previous) {
+  if (reinterpret_cast<WNDPROC>(value) == &gameWindowProcedure) {
+    fatalError("A module set display-guard's own window procedure on the game window");
+  }
+  AcquireSRWLockExclusive(&stateLock);
+  const bool isGame = window != nullptr && window == gameWindow.window;
+  if (isGame) {
+    *previous = reinterpret_cast<WindowLong>(gameWindow.procedure);
+    gameWindow.procedure = reinterpret_cast<WNDPROC>(value);
+    gameWindow.isUnicode = isUnicode;
+  }
+  ReleaseSRWLockExclusive(&stateLock);
+  if (isGame) {
+    writeLogLine("INFO", "gameWindowProcedureBeneath unicode=%s", isUnicode ? "true" : "false");
+  }
+  return isGame;
+}
+
+static WindowLong WINAPI setWindowLongADetour(HWND window, int index, WindowLong value) {
+  WindowLong previous = 0;
+  if (index == GWLP_WNDPROC && setProcedureBeneath(window, value, false, &previous)) {
+    return previous;
+  }
+  return originalSetWindowLongA(window, index, value);
+}
+
+static WindowLong WINAPI setWindowLongWDetour(HWND window, int index, WindowLong value) {
+  WindowLong previous = 0;
+  if (index == GWLP_WNDPROC && setProcedureBeneath(window, value, true, &previous)) {
+    return previous;
+  }
+  return originalSetWindowLongW(window, index, value);
+}
+
+static WindowLong WINAPI getWindowLongADetour(HWND window, int index) {
+  const GameWindow game = currentGame();
+  if (index == GWLP_WNDPROC && window != nullptr && window == game.window) {
+    return reinterpret_cast<WindowLong>(game.procedure);
+  }
+  return originalGetWindowLongA(window, index);
+}
+
+static WindowLong WINAPI getWindowLongWDetour(HWND window, int index) {
+  const GameWindow game = currentGame();
+  if (index == GWLP_WNDPROC && window != nullptr && window == game.window) {
+    return reinterpret_cast<WindowLong>(game.procedure);
+  }
+  return originalGetWindowLongW(window, index);
 }
 
 // Where the window is and how large is display-guard's; whether it is shown stays the game's.
@@ -450,6 +518,14 @@ void installGameWindowHooks(const Configuration& configuration) {
   if (restoreMessage == 0 || frontMessage == 0) {
     fatalError("RegisterWindowMessageA failed (error %lu)", GetLastError());
   }
+  installExportHook("user32.dll", windowLongName("SetWindowLong") "A", reinterpret_cast<void*>(&setWindowLongADetour),
+    reinterpret_cast<void**>(&originalSetWindowLongA));
+  installExportHook("user32.dll", windowLongName("SetWindowLong") "W", reinterpret_cast<void*>(&setWindowLongWDetour),
+    reinterpret_cast<void**>(&originalSetWindowLongW));
+  installExportHook("user32.dll", windowLongName("GetWindowLong") "A", reinterpret_cast<void*>(&getWindowLongADetour),
+    reinterpret_cast<void**>(&originalGetWindowLongA));
+  installExportHook("user32.dll", windowLongName("GetWindowLong") "W", reinterpret_cast<void*>(&getWindowLongWDetour),
+    reinterpret_cast<void**>(&originalGetWindowLongW));
   unsigned hookedCount = 0;
   if (configuration.startMinimized) {
     hookedCount += hookUser32("ShowWindow", &showWindowDetour, &originalShowWindow);

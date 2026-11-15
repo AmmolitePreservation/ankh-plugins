@@ -59,6 +59,61 @@ static bool createGameWindow(HINSTANCE instance) {
   return true;
 }
 
+// A game's login screens can live in a library that takes the window over while they show: it saves the window's
+// procedure and style before the device exists, puts its own procedure in, and when it is done puts both back. Its calls
+// reach user32 through function pointers of its own, not the game's import table.
+#ifdef _WIN64
+typedef LONG_PTR (WINAPI* SetWindowLongFunction)(HWND, int, LONG_PTR);
+typedef LONG_PTR (WINAPI* GetWindowLongFunction)(HWND, int);
+static const char* const setWindowLongName = "SetWindowLongPtrA";
+static const char* const getWindowLongName = "GetWindowLongPtrA";
+#else
+typedef LONG (WINAPI* SetWindowLongFunction)(HWND, int, LONG);
+typedef LONG (WINAPI* GetWindowLongFunction)(HWND, int);
+static const char* const setWindowLongName = "SetWindowLongA";
+static const char* const getWindowLongName = "GetWindowLongA";
+#endif
+typedef BOOL (WINAPI* SetWindowPosFunction)(HWND, HWND, int, int, int, int, UINT);
+
+static SetWindowLongFunction librarySetWindowLong = nullptr;
+static GetWindowLongFunction libraryGetWindowLong = nullptr;
+static SetWindowPosFunction librarySetWindowPos = nullptr;
+static WNDPROC procedureBeforeLoginScreens = nullptr;
+static LONG styleBeforeLoginScreens = 0;
+static int loginScreenMessages = 0;
+
+static LRESULT CALLBACK loginScreenProcedure(HWND window, UINT message, WPARAM wordParameter, LPARAM longParameter) {
+  loginScreenMessages++;
+  return CallWindowProcA(procedureBeforeLoginScreens, window, message, wordParameter, longParameter);
+}
+
+static bool beginLoginScreens() {
+  const HMODULE user32 = GetModuleHandleA("user32.dll");
+  librarySetWindowLong = reinterpret_cast<SetWindowLongFunction>(GetProcAddress(user32, setWindowLongName));
+  libraryGetWindowLong = reinterpret_cast<GetWindowLongFunction>(GetProcAddress(user32, getWindowLongName));
+  librarySetWindowPos = reinterpret_cast<SetWindowPosFunction>(GetProcAddress(user32, "SetWindowPos"));
+  if (librarySetWindowLong == nullptr || libraryGetWindowLong == nullptr || librarySetWindowPos == nullptr) {
+    return failStep("loginScreenFunctions", GetLastError());
+  }
+  procedureBeforeLoginScreens = reinterpret_cast<WNDPROC>(libraryGetWindowLong(gameWindow, GWLP_WNDPROC));
+  styleBeforeLoginScreens = static_cast<LONG>(libraryGetWindowLong(gameWindow, GWL_STYLE));
+  if (librarySetWindowLong(gameWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&loginScreenProcedure)) == 0) {
+    return failStep("loginScreenProcedure", GetLastError());
+  }
+  return true;
+}
+
+static bool endLoginScreens() {
+  const int messagesWhileShown = loginScreenMessages;
+  librarySetWindowLong(gameWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(procedureBeforeLoginScreens));
+  // The window was shown since; the fixture keeps that, where a real library would put back the hidden style.
+  librarySetWindowLong(gameWindow, GWL_STYLE, styleBeforeLoginScreens | (GetWindowLongA(gameWindow, GWL_STYLE) & WS_VISIBLE));
+  librarySetWindowPos(gameWindow, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+  writeReport("loginScreensEnded messages=%d style=0x%08lX", messagesWhileShown > 0,
+    static_cast<unsigned long>(GetWindowLongA(gameWindow, GWL_STYLE)));
+  return true;
+}
+
 static bool parseSize(const char* text, UINT* size) {
   char* end = nullptr;
   const unsigned long value = strtoul(text, &end, 10);
@@ -386,11 +441,13 @@ int runDirect3DMode(HINSTANCE instance, int argumentCount, char** arguments) {
   if (!openReport()) {
     return 8;
   }
-  if (!createGameWindow(instance) || (request.isFullscreen && !requestDisplayMode(&request)) || !createDevice(request)) {
+  if (!createGameWindow(instance) || !beginLoginScreens() || (request.isFullscreen && !requestDisplayMode(&request))
+      || !createDevice(request)) {
     return 9;
   }
   ShowWindow(gameWindow, SW_SHOWNOACTIVATE);
-  if (!reportWindowCalls() || !reportCursorCalls() || !reportGammaChange() || !reportKeyboard(instance) || !reportPresents() || !resetDevice(request)
+  if (!reportWindowCalls() || !reportCursorCalls() || !reportGammaChange() || !reportKeyboard(instance) || !reportPresents()
+      || !endLoginScreens() || !resetDevice(request)
       || (!request.isFullscreen && !reportWindowPlacement(request))) {
     return 9;
   }

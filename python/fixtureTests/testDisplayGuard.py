@@ -127,9 +127,16 @@ class DisplayGuardTest(Direct3DFixtureTest):
     self.assertEqual(placement, {"moveResult": "1", "hidden": "1", "showResult": "1", "shown": "1",
       "style": f"0x{self.borderlessStyle() | styleVisible:08X}", "left": "0", "top": "0", "width": str(self.monitor[0]),
       "height": str(self.monitor[1])})
-    (restyled,) = self.logged("display-guard", "gameWindowRestyled")
-    self.assertEqual(restyled["applied"], f"0x{self.borderlessStyle() | styleVisible:08X}")
+    restyled = self.logged("display-guard", "gameWindowRestyled")
+    self.assertEqual([entry["applied"] for entry in restyled], [f"0x{self.borderlessStyle() | styleVisible:08X}"] * 2)
     self.assertEqual(len(self.logged("display-guard", "gameWindowMoveReplaced")), 2)
+    self.assertTheWindowCoversTheMonitor()
+
+  def testALibraryThatTakesTheWindowOverAndGivesItBackLeavesDisplayGuardInCharge(self):
+    self.launchGuarded(windowed, renderResolution="game")
+    self.assertEqual(self.reported("loginScreensEnded"), [{"messages": "1",
+      "style": f"0x{self.borderlessStyle() | styleVisible:08X}"}])
+    self.assertEqual(self.logged("display-guard", "gameWindowProcedureBeneath"), [{"unicode": "false"}])
     self.assertTheWindowCoversTheMonitor()
 
   def testTheGameKeepsItsSizeWhenItsWindowIsMinimizedAndRestored(self):
