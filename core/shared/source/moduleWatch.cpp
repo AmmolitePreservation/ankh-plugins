@@ -21,13 +21,18 @@ typedef NTSTATUS (NTAPI* LdrRegisterDllNotificationFunction)(ULONG flags, DllNot
   PVOID* cookie);
 
 static const ULONG dllLoadedReason = 1;
+static const ULONG dllUnloadedReason = 2;
 static const size_t moduleNameCapacity = 64;
 static const LONG moduleWatchCapacity = 8;
 
+// A pinned watch runs onLoad once and keeps the module; an unpinned one runs onLoad at each load and onUnload at each
+// unload, state saying whether the module is loaded.
 struct ModuleWatch {
   char moduleName[moduleNameCapacity];
-  void (*callback)();
-  volatile LONG hasRun;
+  void (*onLoad)();
+  void (*onUnload)();
+  bool isPinned;
+  volatile LONG state;
 };
 
 static ModuleWatch moduleWatches[moduleWatchCapacity];
@@ -46,26 +51,40 @@ static bool isNamed(const UNICODE_STRING* baseName, const char* moduleName) {
   return true;
 }
 
-// The callback hooks the module, and a module that is freed and loaded again comes back without the hooks: a game
-// may load a library only to see whether it is there. Pinned, it stays for the life of the process.
-static void runOnce(ModuleWatch* watch) {
-  if (InterlockedExchange(&watch->hasRun, 1) == 0) {
+// A pinned watch's callback hooks a module that, freed and loaded again, would come back without the hooks: a game may
+// load a library only to see whether it is there. Pinned, it stays for the life of the process.
+static void onLoaded(ModuleWatch* watch) {
+  if (InterlockedExchange(&watch->state, 1) != 0) {
+    return;
+  }
+  if (watch->isPinned) {
     HMODULE pinned = nullptr;
     if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_PIN, watch->moduleName, &pinned)) {
       fatalError("Could not keep %s loaded (error %lu)", watch->moduleName, GetLastError());
     }
-    watch->callback();
+  }
+  watch->onLoad();
+}
+
+static void onUnloaded(ModuleWatch* watch) {
+  if (!watch->isPinned && InterlockedExchange(&watch->state, 0) == 1) {
+    watch->onUnload();
   }
 }
 
 static VOID CALLBACK onDllNotification(ULONG reason, const DllNotificationData* data, PVOID context) {
   ModuleWatch* const watch = static_cast<ModuleWatch*>(context);
-  if (reason == dllLoadedReason && data->baseDllName != nullptr && isNamed(data->baseDllName, watch->moduleName)) {
-    runOnce(watch);
+  if (data->baseDllName == nullptr || !isNamed(data->baseDllName, watch->moduleName)) {
+    return;
+  }
+  if (reason == dllLoadedReason) {
+    onLoaded(watch);
+  } else if (reason == dllUnloadedReason) {
+    onUnloaded(watch);
   }
 }
 
-void whenModuleLoads(const char* moduleName, void (*callback)()) {
+static void watchModule(const char* moduleName, void (*onLoad)(), void (*onUnload)(), bool isPinned) {
   if (strlen(moduleName) >= moduleNameCapacity) {
     fatalError("The module name %s is longer than %zu characters", moduleName, moduleNameCapacity - 1);
   }
@@ -75,7 +94,9 @@ void whenModuleLoads(const char* moduleName, void (*callback)()) {
   }
   ModuleWatch* const watch = &moduleWatches[slot];
   strcpy(watch->moduleName, moduleName);
-  watch->callback = callback;
+  watch->onLoad = onLoad;
+  watch->onUnload = onUnload;
+  watch->isPinned = isPinned;
   HMODULE ntdll = GetModuleHandleA("ntdll.dll");
   LdrRegisterDllNotificationFunction ldrRegisterDllNotification = ntdll == nullptr ? nullptr :
     reinterpret_cast<LdrRegisterDllNotificationFunction>(GetProcAddress(ntdll, "LdrRegisterDllNotification"));
@@ -89,6 +110,14 @@ void whenModuleLoads(const char* moduleName, void (*callback)()) {
     fatalError("LdrRegisterDllNotification failed (status 0x%08lX)", static_cast<unsigned long>(status));
   }
   if (GetModuleHandleA(moduleName) != nullptr) {
-    runOnce(watch);
+    onLoaded(watch);
   }
+}
+
+void whenModuleLoads(const char* moduleName, void (*callback)()) {
+  watchModule(moduleName, callback, nullptr, true);
+}
+
+void watchModuleLoads(const char* moduleName, void (*onLoad)(), void (*onUnload)()) {
+  watchModule(moduleName, onLoad, onUnload, false);
 }

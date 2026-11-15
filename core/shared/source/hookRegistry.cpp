@@ -92,6 +92,24 @@ bool installHook(const char* targetName, void* target, void* detour, void** orig
   return true;
 }
 
+void removeHook(void* target) {
+  char targetName[targetNameCapacity];
+  AcquireSRWLockExclusive(&registryLock);
+  size_t index = 0;
+  while (index < hookedTargetCount && hookedTargets[index].address != target) {
+    index++;
+  }
+  if (index == hookedTargetCount) {
+    fatalError("removeHook: no hook was installed at %p", target);
+  }
+  strcpy(targetName, hookedTargets[index].name);
+  requireMinHookSuccess(MH_RemoveHook(target), "remove the hook for", targetName);
+  hookedTargets[index] = hookedTargets[hookedTargetCount - 1];
+  hookedTargetCount--;
+  ReleaseSRWLockExclusive(&registryLock);
+  writeLogLine("INFO", "hookRemoved target=%s", targetName);
+}
+
 // Writes <prefix><module>!<export>, the module's name lacking ".dll".
 static void nameExport(char* targetName, const char* prefix, const char* moduleName, const char* exportName) {
   const char* const dllSuffix = ".dll";
