@@ -125,7 +125,8 @@ static void releaseConfinement() {
     fatalError("GetClipCursor failed (error %lu)", GetLastError());
   }
   if (!EqualRect(&current, &confinement)) {
-    writeLogLine("INFO", "cursorConfinementLeft reason=changedSince");
+    writeLogLine("INFO", "cursorConfinementLeft left=%ld top=%ld right=%ld bottom=%ld", current.left, current.top, current.right,
+      current.bottom);
     return;
   }
   if (!originalClipCursor(nullptr)) {
