@@ -129,9 +129,10 @@ __declspec(dllexport) DWORD Unload() {
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
-  (void)reserved;
   if (reason == DLL_PROCESS_ATTACH) {
     DisableThreadLibraryCalls(instance);
+  } else if (reason == DLL_PROCESS_DETACH && reserved != nullptr && isLoaded) {
+    writeLogLine("INFO", "processEnding");
   }
   return TRUE;
 }

@@ -130,9 +130,10 @@ class LoaderTest(unittest.TestCase):
     self.assertEqual(self.process.exitCode, 0)
     self.assertEqual(self.errors(), [])
 
-  def testAnEndingGameLeavesThePluginsGlobalsInPlace(self):
+  def testAnEndingGameRunsThePluginsExitWorkAndLeavesItsGlobalsInPlace(self):
     self.assertEqual(self.session.command("quit"), {})
     self.assertTrue(windowsApi.waitForExit(self.process.handle, exitSeconds))
+    self.assertEqual([line.event for line in self.log("echo")][-1], "processEnding")
     self.assertFalse(self.teardownMarker().exists())
 
   def testAReloadedPluginsGlobalsAreTornDown(self):
