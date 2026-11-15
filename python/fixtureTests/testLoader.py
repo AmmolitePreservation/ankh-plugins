@@ -119,7 +119,7 @@ class LoaderTest(unittest.TestCase):
     registered = [line.fields["name"] for line in loaderLines if line.event == "commandRegistered" and line.fields["plugin"] == "echo.dll"]
     self.assertEqual(registered, echoCommands * 2)
     self.assertEqual([line.event for line in self.log("echo")],
-      ["sessionStart", "loadComplete", "unloadComplete", "sessionStart", "loadComplete"])
+      ["sessionStart", "loadComplete", "unloadComplete", "sessionStart", "loadComplete", "echoed"])
 
   def testQuitEndsTheGameThroughItsMessageLoop(self):
     self.assertEqual(self.session.command("quit"), {})
