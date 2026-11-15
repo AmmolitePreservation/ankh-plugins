@@ -58,7 +58,7 @@ A root is a folder that holds `games/` and, optionally, `plugins/`. This reposit
     plugins.txt           the plugins to load, in order: the player's, started from the release's and kept up with it
     <plugin>.dll, <plugin>.cfg
     loaded\               shadow copies the game runs from, so a build can replace any plugin
-    logs\<plugin>\        <plugin>_<date>_<time>_pid<process ID>.log, kept 90 days; stability-guard's .dmp files are kept by total size instead
+    logs\<plugin>\        <plugin>_<date>_<time>_pid<process ID>.log, kept 90 days, open only while a line is written (a zip tool can copy a running game's logs; a line that comes while one holds a file is written with the next); stability-guard's .dmp files are kept by total size instead
 ```
 
 ## Build, test and install
