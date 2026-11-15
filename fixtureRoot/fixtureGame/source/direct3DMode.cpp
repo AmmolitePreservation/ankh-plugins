@@ -82,6 +82,9 @@ static WNDPROC procedureBeforeLoginScreens = nullptr;
 static LONG styleBeforeLoginScreens = 0;
 static int loginScreenMessages = 0;
 
+// Read by a fixture game's display-guard handler, as a real game's handler reads the game's own state.
+extern "C" __declspec(dllexport) volatile LONG fixtureLoginScreensShown = 0;
+
 static LRESULT CALLBACK loginScreenProcedure(HWND window, UINT message, WPARAM wordParameter, LPARAM longParameter) {
   loginScreenMessages++;
   return CallWindowProcA(procedureBeforeLoginScreens, window, message, wordParameter, longParameter);
@@ -100,6 +103,7 @@ static bool beginLoginScreens() {
   if (librarySetWindowLong(gameWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&loginScreenProcedure)) == 0) {
     return failStep("loginScreenProcedure", GetLastError());
   }
+  fixtureLoginScreensShown = 1;
   return true;
 }
 
@@ -109,9 +113,16 @@ static bool endLoginScreens() {
   // The window was shown since; the fixture keeps that, where a real library would put back the hidden style.
   librarySetWindowLong(gameWindow, GWL_STYLE, styleBeforeLoginScreens | (GetWindowLongA(gameWindow, GWL_STYLE) & WS_VISIBLE));
   librarySetWindowPos(gameWindow, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+  fixtureLoginScreensShown = 0;
   writeReport("loginScreensEnded messages=%d style=0x%08lX", messagesWhileShown > 0,
     static_cast<unsigned long>(GetWindowLongA(gameWindow, GWL_STYLE)));
   return true;
+}
+
+// One frame of the world after the login screens, before the game resets its device.
+static bool presentAfterLoginScreens() {
+  const HRESULT result = device->Present(nullptr, nullptr, nullptr, nullptr);
+  return SUCCEEDED(result) || failStep("presentAfterLoginScreens", static_cast<unsigned long>(result));
 }
 
 static bool parseSize(const char* text, UINT* size) {
@@ -447,7 +458,7 @@ int runDirect3DMode(HINSTANCE instance, int argumentCount, char** arguments) {
   }
   ShowWindow(gameWindow, SW_SHOWNOACTIVATE);
   if (!reportWindowCalls() || !reportCursorCalls() || !reportGammaChange() || !reportKeyboard(instance) || !reportPresents()
-      || !endLoginScreens() || !resetDevice(request)
+      || !endLoginScreens() || !presentAfterLoginScreens() || !resetDevice(request)
       || (!request.isFullscreen && !reportWindowPlacement(request))) {
     return 9;
   }

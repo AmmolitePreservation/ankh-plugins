@@ -63,6 +63,7 @@ static ChangeDisplaySettingsExAFunction originalChangeDisplaySettingsExA = nullp
 static ChangeDisplaySettingsExWFunction originalChangeDisplaySettingsExW = nullptr;
 
 static std::string monitor;
+static RenderResolution renderResolution = RenderResolution::native;
 static bool isStartMinimized = false;
 static bool isStartupShowPending = false;
 static bool isForegroundRequestLogged = false;
@@ -166,6 +167,16 @@ static void eraseBars(HWND window, HDC deviceContext, const RECT& picture) {
   }
 }
 
+// The size the game is told its window has: its back buffer's, which at the native resolution is the one its display
+// handler wants now, so a size change display-guard asks for reaches the game with the new size.
+static SIZE clientSize(const GameWindow& game) {
+  if (renderResolution != RenderResolution::native) {
+    return { static_cast<LONG>(game.backBufferWidth), static_cast<LONG>(game.backBufferHeight) };
+  }
+  const RECT target = monitorRectangle(monitor);
+  return nativeBackBufferSize(target.right - target.left, target.bottom - target.top);
+}
+
 static void bringToFront(HWND window) {
   isFrontPending = false;
   writeLogLine("INFO", "foregroundOnStart result=%s", SetForegroundWindow(window) ? "done" : "refused");
@@ -220,7 +231,8 @@ static LRESULT CALLBACK gameWindowProcedure(HWND window, UINT message, WPARAM wo
     return 1;
   }
   if (message == WM_SIZE && wordParameter != SIZE_MINIMIZED && game.backBufferWidth != 0) {
-    longParameter = MAKELPARAM(game.backBufferWidth, game.backBufferHeight);
+    const SIZE client = clientSize(game);
+    longParameter = MAKELPARAM(client.cx, client.cy);
   }
   if (hasClientPosition(message) && letterboxOf(window, &letterbox)) {
     // A position over the bars is moved to the nearest picture pixel: the game reads message positions as
@@ -520,6 +532,7 @@ static LONG WINAPI changeDisplaySettingsExWDetour(LPCWSTR device, DEVMODEW* mode
 
 void installGameWindowHooks(const Configuration& configuration) {
   monitor = configuration.monitor;
+  renderResolution = configuration.renderResolution;
   isStartMinimized = configuration.startMinimized;
   isStartupShowPending = configuration.startMinimized;
   restoreMessage = RegisterWindowMessageA("ankh-plugins.display-guard.restoreBorderless");

@@ -47,11 +47,21 @@ class DisplayGuardTest(Direct3DFixtureTest):
     self.monitor = windowsApi.primaryMonitorSize()
     self.launch(arguments, {"display-guard": settings}, isActivated)
 
+  def hasPresentationHandler(self):
+    return (self.game.folder / "handlers" / "display-guard" / "presentationPolicy.cpp").is_file()
+
   def picture(self, backBuffer):
     """Where display-guard presents the back buffer: its shape kept, unless the game replaces the placement with
     its own handler, as one fixture game does with a square."""
-    gameHandler = self.game.folder / "handlers" / "display-guard" / "presentationPolicy.cpp"
-    return letterbox((1, 1) if gameHandler.is_file() else backBuffer, self.monitor)
+    return letterbox((1, 1) if self.hasPresentationHandler() else backBuffer, self.monitor)
+
+  def nativeBackBuffers(self):
+    """The back buffer the game gets at the native resolution while its login screens are shown, and after: the
+    monitor's size, unless its own handler asks for the largest square the monitor holds during the login screens."""
+    if self.hasPresentationHandler():
+      side = min(self.monitor)
+      return (side, side), self.monitor
+    return self.monitor, self.monitor
 
   def clientPosition(self, backBuffer, x, y):
     """The window position at the center of a back buffer pixel."""
@@ -73,32 +83,50 @@ class DisplayGuardTest(Direct3DFixtureTest):
     self.assertEqual(windowsApi.windowRectangle(window), (0, 0, *self.monitor))
     self.assertEqual(windowsApi.windowStyle(window), self.borderlessStyle() | styleVisible)
 
-  def assertTheGameSeesItsBackBuffer(self, backBuffer):
-    self.assertEqual([size(fields) for fields in self.reported("backBuffer")], [backBuffer, backBuffer])
-    self.assertEqual([size(fields) for fields in self.reported("clientRectangle")], [backBuffer])
-    self.assertEqual({size(fields) for fields in self.reported("windowSize") if fields["kind"] == sizeRestored}, {backBuffer})
-    corners = [(0, 0), (backBuffer[0] - 1, backBuffer[1] - 1)]
+  def assertTheGameSeesItsBackBuffer(self, backBuffer, loginBackBuffer=None):
+    """The game's view of its window: the login screens' back buffer while they are shown, where the window is read,
+    and backBuffer after the reset that ends them."""
+    login = loginBackBuffer or backBuffer
+    # The size message display-guard posts when the size changes reaches the game once it reads its messages again.
+    waitFor(lambda: backBuffer in [size(fields) for fields in self.reported("windowSize") if fields["kind"] == sizeRestored],
+      messageSeconds, "the game's size message with its back buffer's size")
+    self.assertEqual([size(fields) for fields in self.reported("backBuffer")], [login, backBuffer])
+    self.assertEqual([size(fields) for fields in self.reported("clientRectangle")], [login])
+    self.assertEqual({size(fields) for fields in self.reported("windowSize") if fields["kind"] == sizeRestored},
+      {login, backBuffer})
+    corners = [(0, 0), (login[0] - 1, login[1] - 1)]
     conversions = self.reported("pointConversion")
     self.assertEqual([size(fields, "x", "y") for fields in conversions], corners)
     self.assertEqual([size(fields, "screenX", "screenY") for fields in conversions],
-      [self.clientPosition(backBuffer, x, y) for x, y in corners])
+      [self.clientPosition(login, x, y) for x, y in corners])
     # A picture narrower than the back buffer has fewer positions than the back buffer has pixels, so the way back
     # from one can end on the pixel beside the one it came from.
     self.assertEqual([size(fields, "backX", "backY") for fields in conversions],
-      [self.backBufferPosition(backBuffer, *self.clientPosition(backBuffer, x, y)) for x, y in corners])
+      [self.backBufferPosition(login, *self.clientPosition(login, x, y)) for x, y in corners])
 
   def testNativeResolutionGivesTheGameABackBufferOfTheMonitorsSize(self):
     self.launchGuarded(windowed)
-    for event in ("deviceCreated", "deviceReset"):
+    login, world = self.nativeBackBuffers()
+    for event, expected in (("deviceCreated", login), ("deviceReset", world)):
       with self.subTest(event=event):
         (applied,) = self.reported(event)
-        self.assertEqual(size(applied, "backBufferWidth", "backBufferHeight"), self.monitor)
+        self.assertEqual(size(applied, "backBufferWidth", "backBufferHeight"), expected)
         self.assertEqual(applied["windowed"], "1")
         (logged,) = self.logged("display-guard", event)
         self.assertEqual(size(logged), requestedSize)
-        self.assertEqual(size(logged, "appliedWidth", "appliedHeight"), self.monitor)
-    self.assertTheGameSeesItsBackBuffer(self.monitor)
+        self.assertEqual(size(logged, "appliedWidth", "appliedHeight"), expected)
+    self.assertTheGameSeesItsBackBuffer(world, login)
     self.assertTheWindowCoversTheMonitor()
+
+  def testAHandlersNewBackBufferSizeIsAskedOfTheGameAsAResizedWindow(self):
+    self.launchGuarded(windowed)
+    if not self.hasPresentationHandler():
+      self.skipTest("the game's back buffer keeps the monitor's size")
+    login, world = self.nativeBackBuffers()
+    self.assertEqual(self.logged("display-guard", "backBufferResizeRequested"), [{"fromWidth": str(login[0]),
+      "fromHeight": str(login[1]), "width": str(world[0]), "height": str(world[1])}])
+    waitFor(lambda: (sizeRestored, world) in [(fields["kind"], size(fields)) for fields in self.reported("windowSize")],
+      messageSeconds, "the game's size message with the new size")
 
   def testTheGamesOwnResolutionIsPresentedIntoThePicture(self):
     self.launchGuarded(windowed, renderResolution="game")
@@ -163,7 +191,7 @@ class DisplayGuardTest(Direct3DFixtureTest):
     self.assertEqual(requested["requestedWindowed"], "0")
     (applied,) = self.reported("deviceCreated")
     self.assertEqual(applied["windowed"], "1")
-    self.assertEqual(size(applied, "backBufferWidth", "backBufferHeight"), self.monitor)
+    self.assertEqual(size(applied, "backBufferWidth", "backBufferHeight"), self.nativeBackBuffers()[0])
     self.assertEqual(len(self.logged("display-guard", "displayModeChangeIgnored")), 1)
     (modeChange,) = self.reported("displayModeChange")
     self.assertEqual(modeChange["result"], "0")
@@ -171,6 +199,8 @@ class DisplayGuardTest(Direct3DFixtureTest):
 
   def testAFullscreenGameStartedNormallyComesToTheFrontOnceItsWindowShows(self):
     self.launchGuarded(["fullscreen"], isActivated=True)
+    # Asked for from a message posted when the window first shows, which the game may read after it is ready.
+    waitFor(lambda: self.logged("display-guard", "foregroundOnStart"), messageSeconds, "the request for the foreground")
     (front,) = self.logged("display-guard", "foregroundOnStart")
     # Windows decides: it refuses when the program that ran the test is not the foreground one.
     self.assertIn(front["result"], ("done", "refused"))
