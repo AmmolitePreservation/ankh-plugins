@@ -192,6 +192,7 @@ if ($test) {
     }
     New-Item -ItemType Directory -Path $fixtureFolder | Out-Null
     Copy-Item -LiteralPath $builtGame -Destination $fixtureFolder
+    Copy-Item -LiteralPath (Join-Path $binaryDirectory "fixtureModule.dll") -Destination $fixtureFolder
     foreach ($builtLauncher in $launcher) {
       Copy-Item -LiteralPath (Join-Path $binaryDirectory $builtLauncher) -Destination $fixtureFolder
     }

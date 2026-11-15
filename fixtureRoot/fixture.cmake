@@ -5,6 +5,13 @@ set(fixtureGame "${game}.fixtureGame")
 add_executable(${fixtureGame} WIN32 EXCLUDE_FROM_ALL ${fixtureGameSources})
 set_target_properties(${fixtureGame} PROPERTIES OUTPUT_NAME fixtureGame RUNTIME_OUTPUT_DIRECTORY "${gameBinaryDirectory}")
 add_dependencies(${game} ${fixtureGame})
+# The DLL the fixture game's module mode loads and frees, for the tests of watchModuleLoads.
+add_library(${game}.fixtureModule SHARED EXCLUDE_FROM_ALL "${rootDirectory}/fixtureModule/source/fixtureModule.cpp")
+set_target_properties(${game}.fixtureModule PROPERTIES OUTPUT_NAME fixtureModule RUNTIME_OUTPUT_DIRECTORY "${gameBinaryDirectory}"
+  ARCHIVE_OUTPUT_DIRECTORY "${gameBinaryDirectory}/lib")
+add_dependencies(${game} ${game}.fixtureModule)
+applyCompileSettings(${game}.fixtureModule)
+applyLinkSettings(${game}.fixtureModule)
 applyCompileSettings(${fixtureGame})
 applyLinkSettings(${fixtureGame})
 if(gameLoader STREQUAL "version")
