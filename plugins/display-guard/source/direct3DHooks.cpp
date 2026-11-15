@@ -1,6 +1,7 @@
 #include "direct3DHooks.h"
 
 #include "direct3D9.h"
+#include "fatalError.h"
 #include "gameWindow.h"
 #include "methodTable.h"
 #include "presentationPolicy.h"
@@ -25,6 +26,7 @@ static RECT presentedPicture = {};
 static UINT presentedWidth = 0;
 static UINT presentedHeight = 0;
 static thread_local unsigned presentDepth = 0;
+static SIZE requestedSize = {};
 
 // The game's request, made windowed: the back buffer keeps its size and takes the desktop's format, as a
 // windowed device must, and fullscreen-only settings are cleared. The copy swap effect is the one Present
@@ -39,11 +41,15 @@ static D3DPRESENT_PARAMETERS windowedParameters(const D3DPRESENT_PARAMETERS& req
   applied.MultiSampleQuality = 0;
   applied.FullScreen_RefreshRateInHz = 0;
   const RECT target = monitorRectangle(monitor);
+  const SIZE native = nativeBackBufferSize(target.right - target.left, target.bottom - target.top);
+  if (native.cx <= 0 || native.cy <= 0) {
+    fatalError("The display handler gives an empty back buffer (%ldx%ld)", native.cx, native.cy);
+  }
   if (renderResolution == RenderResolution::native || applied.BackBufferWidth == 0) {
-    applied.BackBufferWidth = static_cast<UINT>(target.right - target.left);
+    applied.BackBufferWidth = static_cast<UINT>(native.cx);
   }
   if (renderResolution == RenderResolution::native || applied.BackBufferHeight == 0) {
-    applied.BackBufferHeight = static_cast<UINT>(target.bottom - target.top);
+    applied.BackBufferHeight = static_cast<UINT>(native.cy);
   }
   return applied;
 }
@@ -63,6 +69,26 @@ static HWND presentWindow(const D3DPRESENT_PARAMETERS& parameters) {
   return parameters.hDeviceWindow != nullptr ? parameters.hDeviceWindow : focusWindow;
 }
 
+// A size change is asked for once, with the message a resized window sends; the game resizes its device when it handles
+// it, and the reset takes the new size.
+static void followNativeBackBufferSize(HWND window, UINT width, UINT height, const RECT& client) {
+  const SIZE wanted = nativeBackBufferSize(client.right - client.left, client.bottom - client.top);
+  if (wanted.cx == static_cast<LONG>(width) && wanted.cy == static_cast<LONG>(height)) {
+    requestedSize = {};
+    return;
+  }
+  if (wanted.cx == requestedSize.cx && wanted.cy == requestedSize.cy) {
+    return;
+  }
+  if (!PostMessageA(window, WM_SIZE, SIZE_RESTORED, MAKELPARAM(wanted.cx, wanted.cy))) {
+    writeLogLine("ERROR", "backBufferResizeNotPosted error=%lu", GetLastError());
+    return;
+  }
+  requestedSize = wanted;
+  writeLogLine("INFO", "backBufferResizeRequested fromWidth=%u fromHeight=%u width=%ld height=%ld", width, height, wanted.cx,
+    wanted.cy);
+}
+
 // The game's own destination is its idea of its window; the window is the monitor now, so every frame
 // is letterboxed into it instead. Null when the frame should go where the game asked.
 static const RECT* letterboxedDestination(HWND overrideWindow, RECT* picture) {
@@ -77,6 +103,9 @@ static const RECT* letterboxedDestination(HWND overrideWindow, RECT* picture) {
   RECT client = {};
   if (!GetClientRect(window, &client) || IsRectEmpty(&client)) {
     return nullptr;
+  }
+  if (renderResolution == RenderResolution::native) {
+    followNativeBackBufferSize(window, width, height, client);
   }
   *picture = presentationRectangle(width, height, client);
   // Bar erasure belongs to normal window repaint handling, not a GDI GetDC
