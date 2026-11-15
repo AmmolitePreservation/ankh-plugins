@@ -54,10 +54,10 @@ class DatabaseDAOTest(unittest.TestCase):
     shutil.copytree(self.installed.installFolder, copyFolder, ignore=shutil.ignore_patterns("logs", reportFileName))
     self.game = Game(self.installed.root, self.installed.name, copyFolder)
     if not isPluginOn:
-      pluginsPath = self.game.definitionFolder / "plugins.txt"
-      lines = pluginsPath.read_text(encoding="ascii").splitlines()
-      pluginsPath.write_text("".join(f"#{line}\n" if line == pluginFileName else f"{line}\n" for line in lines),
-        encoding="ascii")
+      # The player's list is the one the loader reads; a game that already ran has one beside the shipped list.
+      lines = (self.game.definitionFolder / "plugins.txt").read_text(encoding="ascii").splitlines()
+      (self.game.pluginsFolder / "plugins.txt").write_text(
+        "".join(f"#{line}\n" if line == pluginFileName else f"{line}\n" for line in lines), encoding="ascii")
     self.process = GameProcess.launch(self.game, ["dao"])
     self.addCleanup(self.process.terminate, exitSeconds)
     waitFor(lambda: {"ready", "failed"} & {event for event, _ in self.report()} or self.process.exitCode is not None,

@@ -124,6 +124,13 @@ function(addLibrary targetName outputName buildDirectory)
   set_target_properties(${targetName} PROPERTIES OUTPUT_NAME ${outputName}
     RUNTIME_OUTPUT_DIRECTORY "${buildDirectory}/bin" ARCHIVE_OUTPUT_DIRECTORY "${buildDirectory}/lib")
   target_link_libraries(${targetName} PRIVATE ${library_LIBRARIES} shared)
+  # core/shared/source/dllEntry.cpp: no C runtime teardown while the process ends. A 32-bit __stdcall entry is named
+  # with its argument bytes.
+  if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    target_link_options(${targetName} PRIVATE /ENTRY:dllEntry@12)
+  else()
+    target_link_options(${targetName} PRIVATE /ENTRY:dllEntry)
+  endif()
   applyCompileSettings(${targetName})
   applyLinkSettings(${targetName})
   embedDefaultFiles(${targetName} ${library_SETTINGS})

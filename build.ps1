@@ -75,7 +75,7 @@ if ($hasLauncherSkip) {
   $requiredExports["msimg32.dll"] = @("AlphaBlend")
 }
 foreach ($plugin in $plugins) {
-  $requiredExports[$plugin] = @("Load", "PluginInterfaceVersion")
+  $requiredExports[$plugin] = @("Load", "PluginInterfaceVersion", "CompleteLoad")
 }
 
 function Write-BuildLog {
