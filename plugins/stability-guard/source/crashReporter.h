@@ -12,5 +12,10 @@
 // Neither ever swallows an exception.
 void installCrashReporter(const Configuration& configuration, DWORD mainThreadID);
 
+// A fault at address is the game's own: it faults there on purpose and catches the fault itself, even when its catch
+// asks the unhandled-exception filter, so it is counted and never reported or dumped. reason names it in the log the
+// first time. Up to 16 addresses; a game handler calls this while the plugin loads.
+void expectFault(uintptr_t address, const char* reason);
+
 // Writes the session's crash counts. Called once, at process detach.
 void writeCrashTotals();
