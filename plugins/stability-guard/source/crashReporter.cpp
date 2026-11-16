@@ -50,6 +50,13 @@ static unsigned long fullReportCount = 0;
 static unsigned long repeatCount = 0;
 static unsigned long suppressedCount = 0;
 static unsigned long probeFaultCount = 0;
+struct ExpectedFault {
+  uintptr_t address;
+  const char* reason;
+  volatile LONG count;
+};
+static ExpectedFault expectedFaults[16];
+static size_t expectedFaultCount = 0;
 static volatile LONG fatalCount = 0;
 static volatile LONG isFatalDumpTaken = 0;
 static bool isInstalled = false;
@@ -82,6 +89,20 @@ static bool isSystemProbeFault(DWORD code, uintptr_t address) {
   char location[MAX_PATH + 32];
   describeAddress(address, location, sizeof(location));
   return _strnicmp(location, "kernel32.dll+", 13) == 0 || _strnicmp(location, "kernelbase.dll+", 15) == 0;
+}
+
+// Counts a fault at an expected address, logging it the first time.
+static bool isExpectedFault(uintptr_t address) {
+  for (size_t index = 0; index < expectedFaultCount; index++) {
+    if (expectedFaults[index].address == address) {
+      if (InterlockedIncrement(&expectedFaults[index].count) == 1) {
+        writeLogLine("INFO", "expectedFault address=0x%016llX reason=%s", static_cast<unsigned long long>(address),
+          expectedFaults[index].reason);
+      }
+      return true;
+    }
+  }
+  return false;
 }
 
 static void writeFaultDetail(const EXCEPTION_RECORD* record, char* buffer, size_t bufferSize) {
@@ -143,8 +164,11 @@ static LONG CALLBACK firstChanceHandler(EXCEPTION_POINTERS* exception) {
   if (name == nullptr || isReporting || isDumpThread()) {
     return EXCEPTION_CONTINUE_SEARCH;
   }
-  isReporting = true;
   const uintptr_t address = reinterpret_cast<uintptr_t>(record->ExceptionAddress);
+  if (isExpectedFault(address)) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+  isReporting = true;
 
   EnterCriticalSection(&reportLock);
   if (isSystemProbeFault(record->ExceptionCode, address)) {
@@ -188,9 +212,13 @@ static LONG CALLBACK firstChanceHandler(EXCEPTION_POINTERS* exception) {
 // filter the game installed, which still gets the exception afterwards.
 static LONG WINAPI unhandledExceptionFilter(EXCEPTION_POINTERS* exception) {
   const EXCEPTION_RECORD* record = exception->ExceptionRecord;
-  if (!isReporting && !isDumpThread()) {
+  const uintptr_t address = reinterpret_cast<uintptr_t>(record->ExceptionAddress);
+  bool isExpected = false;
+  for (size_t index = 0; index < expectedFaultCount; index++) {
+    isExpected = isExpected || expectedFaults[index].address == address;
+  }
+  if (!isReporting && !isDumpThread() && !isExpected) {
     isReporting = true;
-    const uintptr_t address = reinterpret_cast<uintptr_t>(record->ExceptionAddress);
     InterlockedIncrement(&fatalCount);
     const char* name = exceptionName(record->ExceptionCode);
     char location[MAX_PATH + 32];
@@ -239,10 +267,26 @@ void installCrashReporter(const Configuration& configuration, DWORD mainThreadID
   writeLogLine("INFO", "crashReporterInstalled previousFilter=%p", gameExceptionFilter);
 }
 
+void expectFault(uintptr_t address, const char* reason) {
+  if (expectedFaultCount == sizeof(expectedFaults) / sizeof(expectedFaults[0])) {
+    fatalError("expectFault called more than %u times", static_cast<unsigned>(sizeof(expectedFaults) / sizeof(expectedFaults[0])));
+  }
+  expectedFaults[expectedFaultCount].address = address;
+  expectedFaults[expectedFaultCount].reason = reason;
+  expectedFaults[expectedFaultCount].count = 0;
+  expectedFaultCount++;
+  writeLogLine("INFO", "faultExpected address=0x%016llX reason=%s", static_cast<unsigned long long>(address), reason);
+}
+
 void writeCrashTotals() {
   if (!isInstalled) {
     return;
   }
-  writeLogLine("INFO", "sessionTotals fullReports=%lu repeats=%lu suppressed=%lu systemProbeFaultsIgnored=%lu fatal=%ld",
-    fullReportCount, repeatCount, suppressedCount, probeFaultCount, fatalCount);
+  LONG expectedCount = 0;
+  for (size_t index = 0; index < expectedFaultCount; index++) {
+    expectedCount += expectedFaults[index].count;
+  }
+  writeLogLine("INFO",
+    "sessionTotals fullReports=%lu repeats=%lu suppressed=%lu systemProbeFaultsIgnored=%lu expectedFaults=%ld fatal=%ld",
+    fullReportCount, repeatCount, suppressedCount, probeFaultCount, expectedCount, fatalCount);
 }
