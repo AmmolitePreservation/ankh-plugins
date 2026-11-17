@@ -2,6 +2,7 @@
 
 #include "fatalError.h"
 #include "gameForeground.h"
+#include "sessionLog.h"
 
 #include <windows.h>
 
@@ -39,6 +40,9 @@ void startFramePacer(unsigned long foregroundFramesPerSecond, unsigned long back
 // game coming back to the foreground is not held to its background rate for one more frame.
 void paceFrame() {
   const unsigned long framesPerSecond = isGameInForeground() ? foregroundRate : backgroundRate;
+  if (framesPerSecond != previousFramesPerSecond) {
+    writeLogLine("INFO", "frameRateLimited framesPerSecond=%lu", framesPerSecond);
+  }
   if (framesPerSecond == 0) {
     previousFramesPerSecond = 0;
     return;
