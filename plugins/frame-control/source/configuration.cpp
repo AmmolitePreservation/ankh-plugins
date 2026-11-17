@@ -1,9 +1,8 @@
 #include "configuration.h"
 
 #include "fatalError.h"
+#include "framePacer.h"
 #include "settingsFile.h"
-
-static const unsigned long framesPerSecondLimit = 1000;
 
 Configuration loadConfiguration(const std::string& pluginDirectory) {
   Configuration configuration = {};
