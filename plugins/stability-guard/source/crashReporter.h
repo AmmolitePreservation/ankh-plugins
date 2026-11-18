@@ -17,5 +17,10 @@ void installCrashReporter(const Configuration& configuration, DWORD mainThreadID
 // first time. Up to 16 addresses; a game handler calls this while the plugin loads.
 void expectFault(uintptr_t address, const char* reason);
 
+// A crash that ends the game ends it once the guard's report and dump are written, without the game's own
+// unhandled-exception filter: for a game whose filter shows a crash dialog and sends the dump to its developers. reason
+// names why in the log, as one word (camelCase). A game handler calls this while the plugin loads.
+void withholdFatalCrashesFromGameFilter(const char* reason);
+
 // Writes the session's crash counts. Called once, at process detach.
 void writeCrashTotals();

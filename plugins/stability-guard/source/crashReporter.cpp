@@ -63,6 +63,8 @@ static bool isInstalled = false;
 // The filter the game (or a library) last installed. The reporter's own filter stays in Windows' slot
 // and hands every unhandled exception on to this one.
 static void* volatile gameExceptionFilter = nullptr;
+// Why the game's filter never gets a fatal crash (withholdFatalCrashesFromGameFilter), or null when it does.
+static const char* gameFilterWithheldReason = nullptr;
 static SetUnhandledExceptionFilterFunction originalSetUnhandledExceptionFilter = nullptr;
 // A fault inside the reporter itself must not recurse into another report.
 static thread_local bool isReporting = false;
@@ -235,6 +237,11 @@ static LONG WINAPI unhandledExceptionFilter(EXCEPTION_POINTERS* exception) {
     isReporting = false;
   }
   LPTOP_LEVEL_EXCEPTION_FILTER gameFilter = reinterpret_cast<LPTOP_LEVEL_EXCEPTION_FILTER>(gameExceptionFilter);
+  // An expected fault is the game's own and its filter catches it, so it is never withheld.
+  if (gameFilterWithheldReason != nullptr && !isExpected) {
+    writeLogLine("INFO", "gameFilterWithheld filter=%p reason=%s", reinterpret_cast<void*>(gameFilter), gameFilterWithheldReason);
+    return EXCEPTION_EXECUTE_HANDLER;
+  }
   return gameFilter != nullptr ? gameFilter(exception) : EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -265,6 +272,14 @@ void installCrashReporter(const Configuration& configuration, DWORD mainThreadID
   gameExceptionFilter = reinterpret_cast<void*>(originalSetUnhandledExceptionFilter(&unhandledExceptionFilter));
   isInstalled = true;
   writeLogLine("INFO", "crashReporterInstalled previousFilter=%p", gameExceptionFilter);
+}
+
+void withholdFatalCrashesFromGameFilter(const char* reason) {
+  if (reason == nullptr || reason[0] == '\0') {
+    fatalError("withholdFatalCrashesFromGameFilter needs a reason");
+  }
+  gameFilterWithheldReason = reason;
+  writeLogLine("INFO", "gameFilterWithholding reason=%s", reason);
 }
 
 void expectFault(uintptr_t address, const char* reason) {

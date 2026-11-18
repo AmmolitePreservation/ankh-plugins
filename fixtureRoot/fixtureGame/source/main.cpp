@@ -1,3 +1,4 @@
+#include "crashMode.h"
 #include "daoMode.h"
 #include "direct3DMode.h"
 #include "moduleMode.h"
@@ -10,7 +11,8 @@
 // A stand-in game for the tests. It imports the system DLL the loader stands in for, so the loader beside it
 // starts with it, and pumps messages on its main thread until a plugin posts WM_QUIT. Started with the arguments
 // "direct3D ..." it first acts as a Direct3D 9 game (direct3DMode.h), with "dao" as a game built with DAO 3.5
-// (daoMode.h), with "module" as a game that loads and frees a DLL of its own (moduleMode.h).
+// (daoMode.h), with "module" as a game that loads and frees a DLL of its own (moduleMode.h), with "crash" as a game
+// whose own crash filter is installed when it faults (crashMode.h).
 // Exit codes: the WM_QUIT's (0 from the test plugin); 2 the call the loader forwards could not be set up; 3 nothing
 // ended it within its lifetime; 4 the call the loader forwards failed; 5 the timer did not start; 6 GetMessage failed;
 // 7 the arguments name no mode; 8 a mode's report could not be opened; 9 a step of a mode failed, which the report's
@@ -66,6 +68,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
       modeFailure = runDAOMode();
     } else if (strcmp(__argv[1], "module") == 0 && __argc == 2) {
       modeFailure = runModuleMode();
+    } else if (strcmp(__argv[1], "crash") == 0 && __argc == 2) {
+      modeFailure = runCrashMode();
     }
     if (modeFailure != 0) {
       return modeFailure;
