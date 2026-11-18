@@ -4,7 +4,7 @@
 
 #include <windows.h>
 
-// The game's main window is the one its Direct3D device presents into. From the device's creation on it is a
+// The game's main window is the one its Direct3D device presents into, or its OpenGL pixel format is set on. From the device's creation on it is a
 // borderless, non-topmost popup covering the configured monitor: the game's own restyling and moving of it becomes
 // that placement, the game cannot change the display mode, and it cannot bring itself in front of another
 // application's window. The game sees a client area exactly the size of its back buffer: size and mouse messages

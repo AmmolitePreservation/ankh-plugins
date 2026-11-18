@@ -3,6 +3,7 @@
 #include "direct3D8.h"
 #include "direct3D9.h"
 #include "framePacer.h"
+#include "hookRegistry.h"
 #include "methodTable.h"
 #include "sessionLog.h"
 
@@ -13,7 +14,16 @@ static SwapChainPresentFunction originalSwapChainPresent = nullptr;
 static Direct3D8CreateDeviceFunction originalCreateDevice8 = nullptr;
 static Device8PresentFunction originalPresent8 = nullptr;
 
+typedef BOOL (WINAPI* SwapBuffersFunction)(HDC);
+static SwapBuffersFunction originalSwapBuffers = nullptr;
+
 static thread_local unsigned presentDepth = 0;
+
+// An OpenGL game presents with SwapBuffers.
+static BOOL WINAPI swapBuffersDetour(HDC deviceContext) {
+  paceFrame();
+  return originalSwapBuffers(deviceContext);
+}
 
 static HRESULT STDMETHODCALLTYPE presentDetour(IDirect3DDevice9* device, const RECT* source, const RECT* destination,
     HWND overrideWindow, const RGNDATA* dirtyRegion) {
@@ -77,6 +87,8 @@ void installFramePacing(const Configuration& configuration) {
   startFramePacer(configuration.foregroundFramesPerSecond, configuration.backgroundFramesPerSecond);
   whenDirect3D9IsCreated(&onDirect3DCreated);
   whenDirect3D8IsCreated(&onDirect3D8Created);
+  installImportHook(GetModuleHandleA(nullptr), "gdi32.dll", "SwapBuffers", reinterpret_cast<void*>(&swapBuffersDetour),
+    reinterpret_cast<void**>(&originalSwapBuffers));
   writeLogLine("INFO", "framePacingEnabled foregroundFPS=%lu backgroundFPS=%lu", configuration.foregroundFramesPerSecond,
     configuration.backgroundFramesPerSecond);
 }

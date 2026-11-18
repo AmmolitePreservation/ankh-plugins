@@ -24,6 +24,7 @@ typedef LONG WindowLong;
 typedef WindowLong (WINAPI* SetWindowLongFunction)(HWND, int, WindowLong);
 typedef WindowLong (WINAPI* GetWindowLongFunction)(HWND, int);
 typedef BOOL (WINAPI* SetWindowPosFunction)(HWND, HWND, int, int, int, int, UINT);
+typedef BOOL (WINAPI* MoveWindowFunction)(HWND, int, int, int, int, BOOL);
 typedef BOOL (WINAPI* GetClientRectFunction)(HWND, RECT*);
 typedef BOOL (WINAPI* ConvertPointFunction)(HWND, POINT*);
 typedef BOOL (WINAPI* SetForegroundWindowFunction)(HWND);
@@ -52,6 +53,7 @@ static SetWindowLongFunction originalSetWindowLongW = nullptr;
 static GetWindowLongFunction originalGetWindowLongA = nullptr;
 static GetWindowLongFunction originalGetWindowLongW = nullptr;
 static SetWindowPosFunction originalSetWindowPos = nullptr;
+static MoveWindowFunction originalMoveWindow = nullptr;
 static GetClientRectFunction originalGetClientRect = nullptr;
 static ConvertPointFunction originalClientToScreen = nullptr;
 static ConvertPointFunction originalScreenToClient = nullptr;
@@ -312,17 +314,17 @@ static bool isStartedWithoutActivation() {
 
 void adoptGameWindow(HWND window, UINT backBufferWidth, UINT backBufferHeight, bool isFullscreenRequested) {
   if (window == nullptr) {
-    fatalError("The game created a Direct3D device with no window to present into");
+    fatalError("The game draws into no window");
   }
   const bool isNew = !isGameWindow(window);
   if (isNew) {
     if ((GetWindowLongA(window, GWL_STYLE) & WS_CHILD) != 0) {
-      fatalError("The game's Direct3D device presents into a child window, which display-guard cannot place");
+      fatalError("The game draws into a child window, which display-guard cannot place");
     }
     DWORD error = 0;
     const Subclassing outcome = subclassGameWindow(window, &error);
     if (outcome == Subclassing::secondWindow) {
-      fatalError("The game created a Direct3D device for a second window while its first one still exists");
+      fatalError("The game draws into a second window while its first one still exists");
     }
     if (outcome == Subclassing::failed) {
       fatalError("Replacing the game window's procedure failed (error %lu)", error);
@@ -333,12 +335,24 @@ void adoptGameWindow(HWND window, UINT backBufferWidth, UINT backBufferHeight, b
   if (!isNew) {
     return;
   }
-  if (!IsIconic(window)) {
+  // An OpenGL game can set up its window from a render thread while the window's own thread waits for it: placing
+  // the window from there would wait on that thread in turn, so the window's thread is asked to place it.
+  const bool isOtherThread = GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId();
+  if (isOtherThread) {
+    isRestorePending = PostMessageA(window, restoreMessage, 0, 0) != FALSE;
+    if (!isRestorePending) {
+      fatalError("Posting the game window's placement failed (error %lu)", GetLastError());
+    }
+  } else if (!IsIconic(window)) {
     placeBorderless(window, monitor);
   }
   if (isStartupShowPending && IsWindowVisible(window)) {
     isStartupShowPending = false;
-    ShowWindow(window, SW_SHOWMINNOACTIVE);
+    if (isOtherThread) {
+      ShowWindowAsync(window, SW_SHOWMINNOACTIVE);
+    } else {
+      ShowWindow(window, SW_SHOWMINNOACTIVE);
+    }
     writeLogLine("INFO", "startupMinimized");
   }
   // An exclusive fullscreen device takes the foreground; the borderless window that replaces it takes it once, when
@@ -442,6 +456,17 @@ static BOOL WINAPI setWindowPosDetour(HWND window, HWND insertAfter, int left, i
   }
   return originalSetWindowPos(window, nullptr, 0, 0, 0, 0,
     visibility | (flags & SWP_NOACTIVATE) | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+}
+
+static BOOL WINAPI moveWindowDetour(HWND window, int left, int top, int width, int height, BOOL repaint) {
+  if (!isGameWindow(window)) {
+    return originalMoveWindow(window, left, top, width, height, repaint);
+  }
+  writeLogLine("INFO", "gameWindowMoveReplaced left=%d top=%d width=%d height=%d", left, top, width, height);
+  if (!IsIconic(window)) {
+    placeBorderless(window, monitor);
+  }
+  return TRUE;
 }
 
 static BOOL WINAPI getClientRectDetour(HWND window, RECT* rectangle) {
@@ -557,6 +582,7 @@ void installGameWindowHooks(const Configuration& configuration) {
   hookedCount += hookUser32("ChangeDisplaySettingsExA", &changeDisplaySettingsExADetour, &originalChangeDisplaySettingsExA);
   hookedCount += hookUser32("ChangeDisplaySettingsExW", &changeDisplaySettingsExWDetour, &originalChangeDisplaySettingsExW);
   hookedCount += hookUser32("SetWindowPos", &setWindowPosDetour, &originalSetWindowPos);
+  hookedCount += hookUser32("MoveWindow", &moveWindowDetour, &originalMoveWindow);
   hookedCount += hookUser32("GetClientRect", &getClientRectDetour, &originalGetClientRect);
   hookedCount += hookUser32("ClientToScreen", &clientToScreenDetour, &originalClientToScreen);
   hookedCount += hookUser32("ScreenToClient", &screenToClientDetour, &originalScreenToClient);
