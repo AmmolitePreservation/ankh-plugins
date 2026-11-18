@@ -335,12 +335,24 @@ void adoptGameWindow(HWND window, UINT backBufferWidth, UINT backBufferHeight, b
   if (!isNew) {
     return;
   }
-  if (!IsIconic(window)) {
+  // An OpenGL game can set up its window from a render thread while the window's own thread waits for it: placing
+  // the window from there would wait on that thread in turn, so the window's thread is asked to place it.
+  const bool isOtherThread = GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId();
+  if (isOtherThread) {
+    isRestorePending = PostMessageA(window, restoreMessage, 0, 0) != FALSE;
+    if (!isRestorePending) {
+      fatalError("Posting the game window's placement failed (error %lu)", GetLastError());
+    }
+  } else if (!IsIconic(window)) {
     placeBorderless(window, monitor);
   }
   if (isStartupShowPending && IsWindowVisible(window)) {
     isStartupShowPending = false;
-    ShowWindow(window, SW_SHOWMINNOACTIVE);
+    if (isOtherThread) {
+      ShowWindowAsync(window, SW_SHOWMINNOACTIVE);
+    } else {
+      ShowWindow(window, SW_SHOWMINNOACTIVE);
+    }
     writeLogLine("INFO", "startupMinimized");
   }
   // An exclusive fullscreen device takes the foreground; the borderless window that replaces it takes it once, when
