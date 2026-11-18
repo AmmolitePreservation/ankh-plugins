@@ -470,13 +470,13 @@ std::string runLoaderCommand(const std::string& line) {
   } else {
     reply = "error unknown command '" + name + "'";
   }
-  // A log line holds 1 KB and a longer one is fatal, while a command line or a reply can be far longer.
+  // A log line holds 1 KB and a longer one is fatal, while a reply can be far longer. A command's arguments are never
+  // logged: a test can type a password into the game through one.
   const size_t loggedLength = 160;
-  const auto bounded = [loggedLength](const std::string& text) {
-    return text.size() > loggedLength
-      ? text.substr(0, loggedLength) + "...(" + std::to_string(text.size()) + " bytes)" : text;
-  };
-  writeLogLine(reply.compare(0, 2, "ok") == 0 ? "INFO" : "WARN", "command line=%s reply=%s", bounded(line).c_str(),
-    bounded(reply).c_str());
+  const std::string loggedReply = reply.size() > loggedLength
+    ? reply.substr(0, loggedLength) + "...(" + std::to_string(reply.size()) + " bytes)" : reply;
+  const size_t argumentCount = argument.empty() ? 0 : 1 + std::count(argument.begin(), argument.end(), ' ');
+  writeLogLine(reply.compare(0, 2, "ok") == 0 ? "INFO" : "WARN", "command name=%s arguments=%u reply=%s",
+    name.substr(0, loggedLength).c_str(), static_cast<unsigned>(argumentCount), loggedReply.c_str());
   return reply;
 }
