@@ -26,6 +26,7 @@ typedef WindowLong (WINAPI* GetWindowLongFunction)(HWND, int);
 typedef BOOL (WINAPI* SetWindowPosFunction)(HWND, HWND, int, int, int, int, UINT);
 typedef BOOL (WINAPI* MoveWindowFunction)(HWND, int, int, int, int, BOOL);
 typedef BOOL (WINAPI* GetClientRectFunction)(HWND, RECT*);
+typedef BOOL (WINAPI* GetWindowRectFunction)(HWND, RECT*);
 typedef BOOL (WINAPI* ConvertPointFunction)(HWND, POINT*);
 typedef BOOL (WINAPI* SetForegroundWindowFunction)(HWND);
 typedef BOOL (WINAPI* ShowWindowFunction)(HWND, int);
@@ -55,6 +56,7 @@ static GetWindowLongFunction originalGetWindowLongW = nullptr;
 static SetWindowPosFunction originalSetWindowPos = nullptr;
 static MoveWindowFunction originalMoveWindow = nullptr;
 static GetClientRectFunction originalGetClientRect = nullptr;
+static GetWindowRectFunction originalGetWindowRect = nullptr;
 static ConvertPointFunction originalClientToScreen = nullptr;
 static ConvertPointFunction originalScreenToClient = nullptr;
 static SetForegroundWindowFunction originalSetForegroundWindow = nullptr;
@@ -478,6 +480,24 @@ static BOOL WINAPI getClientRectDetour(HWND window, RECT* rectangle) {
   return TRUE;
 }
 
+// A game that sizes its window from this (a size poll, a cursor scale) must find the size of its back buffer, as it does
+// from GetClientRect, or the cursor lands beside what it points at: the picture can be smaller than the window, between
+// bars, and the back buffer is the picture's size at the native resolution. The rectangle is where the picture is, so a
+// test of the cursor against the window agrees with what the game drew.
+static BOOL WINAPI getWindowRectDetour(HWND window, RECT* rectangle) {
+  Letterbox letterbox = {};
+  if (rectangle == nullptr || IsIconic(window) || !letterboxOf(window, &letterbox)) {
+    return originalGetWindowRect(window, rectangle);
+  }
+  POINT origin = { letterbox.picture.left, letterbox.picture.top };
+  if (!ClientToScreen(window, &origin)) {
+    fatalError("ClientToScreen failed for the game's window (error %lu)", GetLastError());
+  }
+  *rectangle = { origin.x, origin.y, origin.x + static_cast<LONG>(letterbox.backBufferWidth),
+    origin.y + static_cast<LONG>(letterbox.backBufferHeight) };
+  return TRUE;
+}
+
 static BOOL WINAPI clientToScreenDetour(HWND window, POINT* point) {
   Letterbox letterbox = {};
   if (point != nullptr && letterboxOf(window, &letterbox)) {
@@ -584,6 +604,7 @@ void installGameWindowHooks(const Configuration& configuration) {
   hookedCount += hookUser32("SetWindowPos", &setWindowPosDetour, &originalSetWindowPos);
   hookedCount += hookUser32("MoveWindow", &moveWindowDetour, &originalMoveWindow);
   hookedCount += hookUser32("GetClientRect", &getClientRectDetour, &originalGetClientRect);
+  hookedCount += hookUser32("GetWindowRect", &getWindowRectDetour, &originalGetWindowRect);
   hookedCount += hookUser32("ClientToScreen", &clientToScreenDetour, &originalClientToScreen);
   hookedCount += hookUser32("ScreenToClient", &screenToClientDetour, &originalScreenToClient);
   hookedCount += hookUser32("SetForegroundWindow", &setForegroundWindowDetour, &originalSetForegroundWindow);
