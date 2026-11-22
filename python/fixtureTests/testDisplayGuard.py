@@ -22,7 +22,7 @@ releasedCooperativeLevel = "0x06"
 confinementEvents = {"cursorConfined", "cursorReleased", "cursorConfinementLeft", "cursorConfinementRefused",
   "cursorReleaseRefused"}
 
-importedByTheFixture = ["ChangeDisplaySettingsA", "SetWindowPos", "GetClientRect", "ClientToScreen",
+importedByTheFixture = ["ChangeDisplaySettingsA", "SetWindowPos", "GetClientRect", "GetWindowRect", "ClientToScreen",
   "ScreenToClient", "SetForegroundWindow", "SetCursorPos", "ClipCursor"]
 
 
@@ -92,6 +92,11 @@ class DisplayGuardTest(Direct3DFixtureTest):
       messageSeconds, "the game's size message with its back buffer's size")
     self.assertEqual([size(fields) for fields in self.reported("backBuffer")], [login, backBuffer])
     self.assertEqual([size(fields) for fields in self.reported("clientRectangle")], [login])
+    # The window as the game reads its size from: the picture's place at the back buffer's size, so a size it takes from
+    # the window is the one it draws at, and a position tested against it is the picture's.
+    left, top, _, _ = self.picture(login)
+    self.assertEqual([(int(fields["left"]), int(fields["top"]), *size(fields)) for fields in self.reported("windowRectangle")],
+      [(left, top, *login)])
     self.assertEqual({size(fields) for fields in self.reported("windowSize") if fields["kind"] == sizeRestored},
       {login, backBuffer})
     corners = [(0, 0), (login[0] - 1, login[1] - 1)]
@@ -155,9 +160,12 @@ class DisplayGuardTest(Direct3DFixtureTest):
   def testTheGamesRestylingAndMovingLeaveTheWindowBorderlessOnTheMonitor(self):
     self.launchGuarded(windowed)
     (placement,) = self.reported("windowPlacement")
+    # What the game reads back is its picture's place at its back buffer's size (the window itself covers the monitor).
+    _, world = self.nativeBackBuffers()
+    left, top, _, _ = self.picture(world)
     self.assertEqual(placement, {"moveResult": "1", "hidden": "1", "showResult": "1", "shown": "1",
-      "style": f"0x{self.borderlessStyle() | styleVisible:08X}", "left": "0", "top": "0", "width": str(self.monitor[0]),
-      "height": str(self.monitor[1])})
+      "style": f"0x{self.borderlessStyle() | styleVisible:08X}", "left": str(left), "top": str(top), "width": str(world[0]),
+      "height": str(world[1])})
     restyled = self.logged("display-guard", "gameWindowRestyled")
     self.assertEqual([entry["applied"] for entry in restyled], [f"0x{self.borderlessStyle() | styleVisible:08X}"] * 2)
     self.assertEqual(len(self.logged("display-guard", "gameWindowMoveReplaced")), 2)

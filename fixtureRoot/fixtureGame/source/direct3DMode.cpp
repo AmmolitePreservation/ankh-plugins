@@ -271,6 +271,12 @@ static bool reportWindowCalls() {
     return failStep("getClientRect", GetLastError());
   }
   writeReport("clientRectangle width=%ld height=%ld", client.right, client.bottom);
+  RECT window = {};
+  if (!GetWindowRect(gameWindow, &window)) {
+    return failStep("getWindowRect", GetLastError());
+  }
+  writeReport("windowRectangle left=%ld top=%ld width=%ld height=%ld", window.left, window.top, window.right - window.left,
+    window.bottom - window.top);
   if (!reportPoint(0, 0) || !reportPoint(client.right - 1, client.bottom - 1)) {
     return false;
   }
