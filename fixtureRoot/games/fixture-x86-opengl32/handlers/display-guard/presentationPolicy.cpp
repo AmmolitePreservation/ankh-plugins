@@ -5,7 +5,7 @@
 
 static const volatile LONG* loginScreensShown = nullptr;
 
-void initializePresentationPolicy(const PluginHost*) {
+void initializePresentationPolicy(const PluginHost*, RenderResolution) {
   loginScreensShown = reinterpret_cast<const volatile LONG*>(GetProcAddress(GetModuleHandleA(nullptr), "fixtureLoginScreensShown"));
   if (loginScreensShown == nullptr) {
     fatalError("The fixture game exports no fixtureLoginScreensShown");

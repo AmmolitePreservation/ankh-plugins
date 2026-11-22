@@ -2,7 +2,7 @@
 
 #include "windowPlacement.h"
 
-void initializePresentationPolicy(const PluginHost*) {
+void initializePresentationPolicy(const PluginHost*, RenderResolution) {
 }
 
 RECT presentationRectangle(UINT backBufferWidth, UINT backBufferHeight, const RECT& target) {
