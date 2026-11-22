@@ -51,7 +51,7 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
     target.left, target.top, target.right - target.left, target.bottom - target.top);
 
   initializeHookRegistry();
-  initializePresentationPolicy(host);
+  initializePresentationPolicy(host, configuration.renderResolution);
   prepareGameDisplay(host, target);
   installGameWindowHooks(configuration);
   installDirect3DHooks(configuration);
