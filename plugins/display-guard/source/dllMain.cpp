@@ -50,6 +50,9 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
   writeLogLine("INFO", "monitorSelected monitor=%s left=%ld top=%ld width=%ld height=%ld", configuration.monitor.c_str(),
     target.left, target.top, target.right - target.left, target.bottom - target.top);
 
+  // A game that reads no window messages for 5 seconds, as some do while they load, is swapped for a
+  // ghost window by Windows; the ghost does not cover the taskbar, which flashed over the game at each swap.
+  DisableProcessWindowsGhosting();
   initializeHookRegistry();
   initializePresentationPolicy(host, configuration.renderResolution);
   prepareGameDisplay(host, target);
