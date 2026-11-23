@@ -337,6 +337,12 @@ void adoptGameWindow(HWND window, UINT backBufferWidth, UINT backBufferHeight, b
   if (!isNew) {
     return;
   }
+  // A game can read its window's size once, before display-guard adopted the window, and again only after a size
+  // message; it then kept the monitor's size for a smaller back buffer and drew its interface past the picture's edge.
+  // Sent once, at adoption: a game may reset its device for every size message.
+  if (!IsIconic(window) && !PostMessageA(window, WM_SIZE, SIZE_RESTORED, MAKELPARAM(backBufferWidth, backBufferHeight))) {
+    fatalError("Could not tell the game its window's size (error %lu)", GetLastError());
+  }
   // An OpenGL game can set up its window from a render thread while the window's own thread waits for it: placing
   // the window from there would wait on that thread in turn, so the window's thread is asked to place it.
   const bool isOtherThread = GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId();
