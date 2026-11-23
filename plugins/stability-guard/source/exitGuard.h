@@ -6,7 +6,7 @@
 
 // Makes quitting reliable. A close request on one of the game's own top-level
 // windows (the X button, Alt+F4), a click on its close button while the game is
-// too busy to act on it (seen by a mouse hook on the watchdog's own thread), or the
+// too busy to act on it (the watchdog polls the left button and asks the window where it was released), or the
 // game starting to quit (PostQuitMessage on its main thread, where the in-game Quit button leads)
 // arms a timer; if the process is still
 // running when it expires, it is terminated, exactly as Task Manager would.

@@ -10,11 +10,8 @@
 
 typedef void (WINAPI* PostQuitMessageFunction)(int exitCode);
 
-// Posted from the low-level mouse hook to the watchdog's own queue, so the (slow) check runs outside the hook
-// callback, which Windows gives only a few hundred milliseconds.
-static const UINT clickReleasedMessage = WM_APP + 1;
-// Shorter than the quickest press of F4 with Ctrl+Alt held.
-static const DWORD forceExitKeysPollMilliseconds = 20;
+// Shorter than the quickest press of F4 with Ctrl+Alt held, and than the quickest click.
+static const DWORD inputPollMilliseconds = 20;
 // How long a busy game window gets to answer "which part of you is here?".
 static const UINT hitTestTimeoutMilliseconds = 250;
 // Standard dialog boxes (message boxes and the like) use this class; closing one
@@ -27,8 +24,6 @@ static DWORD gameMainThreadID = 0;
 static HANDLE exitRequestedEvent = nullptr;
 static HANDLE watchdogReadyEvent = nullptr;
 static volatile LONG watchdogStartupError = 0;
-// The watchdog thread's GetLastError for a hook it could not install.
-static volatile LONG watchdogSystemError = 0;
 // Written once by the first request; read by the watchdog after the event says it is set.
 static void* volatile requestTrigger = nullptr;
 static PostQuitMessageFunction originalPostQuitMessage = nullptr;
@@ -86,22 +81,10 @@ static LRESULT CALLBACK callWindowProcedureHook(int code, WPARAM sentByThisThrea
   return CallNextHookEx(nullptr, code, sentByThisThread, messageAddress);
 }
 
-// The watchdog thread's mouse hook. It only notes where a left click was released;
-// deciding whether that was the game's close button happens on the watchdog loop.
-static LRESULT CALLBACK lowLevelMouseHook(int code, WPARAM message, LPARAM eventAddress) {
-  if (code == HC_ACTION && message == WM_LBUTTONUP) {
-    const MSLLHOOKSTRUCT* event = reinterpret_cast<const MSLLHOOKSTRUCT*>(eventAddress);
-    PostThreadMessageA(watchdogThreadID, clickReleasedMessage, static_cast<WPARAM>(event->pt.x),
-      static_cast<LPARAM>(event->pt.y));
-  }
-  return CallNextHookEx(nullptr, code, message, eventAddress);
-}
-
 // A click released over one of the game's own windows is a close request when the
 // window itself says the point is its close button. The game's message loop keeps
 // answering sent messages like this one even while it ignores the click.
-static void handleClickReleased(LONG physicalX, LONG physicalY) {
-  POINT screenPoint = { physicalX, physicalY };
+static void handleClickReleased(POINT screenPoint) {
   HWND window = WindowFromPoint(screenPoint);
   if (window == nullptr) {
     return;
@@ -162,12 +145,14 @@ static void WINAPI postQuitMessageDetour(int exitCode) {
   originalPostQuitMessage(exitCode);
 }
 
+// Whether the left button is down, as the watchdog polls it: no system-wide input hook, which would sit in the path
+// of every click on the desktop while the game runs.
+static bool isLeftButtonDown() {
+  return (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+}
+
 static DWORD WINAPI watchdogThread(LPVOID) {
-  MSG message;
-  // Creates this thread's message queue before the hooks are tied to it.
-  PeekMessageA(&message, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
-  // Mouse hook positions are physical pixels; per-monitor awareness makes this
-  // thread's WindowFromPoint take them as they are.
+  // Per-monitor awareness gives this thread's GetCursorPos and WindowFromPoint physical pixels.
   HMODULE user32 = GetModuleHandleA("user32.dll");
   SetThreadDpiAwarenessContextFunction setThreadDpiAwarenessContext =
     reinterpret_cast<SetThreadDpiAwarenessContextFunction>(
@@ -186,12 +171,6 @@ static DWORD WINAPI watchdogThread(LPVOID) {
     SetEvent(watchdogReadyEvent);
     return 1;
   }
-  if (SetWindowsHookExA(WH_MOUSE_LL, &lowLevelMouseHook, GetModuleHandleA(nullptr), 0) == nullptr) {
-    InterlockedExchange(&watchdogSystemError, static_cast<LONG>(GetLastError()));
-    InterlockedExchange(&watchdogStartupError, -2);
-    SetEvent(watchdogReadyEvent);
-    return 1;
-  }
   SetEvent(watchdogReadyEvent);
 
   DWORD armedTicks = 0;
@@ -199,8 +178,9 @@ static DWORD WINAPI watchdogThread(LPVOID) {
   // Only the moment the keys go down counts, so a game that comes to the front while they are still held (because
   // they just ended the game that was in front) keeps running.
   bool wereForceExitKeysDown = false;
+  bool wasLeftButtonDown = isLeftButtonDown();
   for (;;) {
-    DWORD timeout = isHotkeyEnabled ? forceExitKeysPollMilliseconds : INFINITE;
+    DWORD timeout = inputPollMilliseconds;
     if (isArmed) {
       const DWORD elapsed = GetTickCount() - armedTicks;
       if (elapsed >= exitGraceMilliseconds) {
@@ -210,22 +190,24 @@ static DWORD WINAPI watchdogThread(LPVOID) {
         timeout = exitGraceMilliseconds - elapsed;
       }
     }
-    const DWORD waitResult = MsgWaitForMultipleObjects(1, &exitRequestedEvent, FALSE, timeout, QS_ALLINPUT);
+    const DWORD waitResult = WaitForSingleObject(exitRequestedEvent, timeout);
     if (waitResult == WAIT_OBJECT_0) {
       if (!isArmed) {
         isArmed = true;
         armedTicks = GetTickCount();
         writeLogLine("INFO", "exitRequested trigger=%s graceMilliseconds=%lu", triggerName(), exitGraceMilliseconds);
       }
-    } else if (waitResult == WAIT_OBJECT_0 + 1) {
-      while (PeekMessageA(&message, nullptr, 0, 0, PM_REMOVE)) {
-        if (message.message == clickReleasedMessage) {
-          handleClickReleased(static_cast<LONG>(message.wParam), static_cast<LONG>(message.lParam));
-        }
-      }
     } else if (waitResult != WAIT_TIMEOUT) {
       fatalError("Exit watchdog wait failed (error %lu)", GetLastError());
     }
+    const bool isButtonDown = isLeftButtonDown();
+    if (wasLeftButtonDown && !isButtonDown) {
+      POINT cursor;
+      if (GetCursorPos(&cursor)) {
+        handleClickReleased(cursor);
+      }
+    }
+    wasLeftButtonDown = isButtonDown;
     if (isHotkeyEnabled) {
       const bool areKeysDown = areForceExitKeysDown();
       if (areKeysDown && !wereForceExitKeysDown) {
@@ -269,9 +251,6 @@ void installExitGuard(const Configuration& configuration, DWORD mainThreadID) {
   }
   if (watchdogStartupError == -3) {
     fatalError("The exit guard could not make its thread per-monitor DPI aware");
-  }
-  if (watchdogStartupError == -2) {
-    fatalError("Could not watch mouse clicks for the game's close button (error %ld)", watchdogSystemError);
   }
   writeLogLine("INFO", "exitGuardInstalled graceSeconds=%lu forceExitHotkey=%s", configuration.exitGraceSeconds,
     configuration.forceExitHotkey ? "Ctrl+Alt+F4" : "off");
