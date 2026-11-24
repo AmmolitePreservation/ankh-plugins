@@ -1,6 +1,7 @@
 #include "windowPlacement.h"
 
 #include "fatalError.h"
+#include "gameDisplay.h"
 
 #include <vector>
 
@@ -53,8 +54,14 @@ LONG borderlessExtendedStyle(LONG extendedStyle) {
   return extendedStyle & ~(WS_EX_TOPMOST | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_STATICEDGE);
 }
 
+RECT gameWindowRectangle(const std::string& monitor) {
+  RECT rectangle = monitorRectangle(monitor);
+  rectangle.top -= windowRowsAboveMonitor();
+  return rectangle;
+}
+
 bool placeBorderless(HWND window, const std::string& monitor) {
-  const RECT target = monitorRectangle(monitor);
+  const RECT target = gameWindowRectangle(monitor);
   const LONG style = GetWindowLongA(window, GWL_STYLE);
   const LONG extendedStyle = GetWindowLongA(window, GWL_EXSTYLE);
   const LONG wantedStyle = borderlessStyle(style);

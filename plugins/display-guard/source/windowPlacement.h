@@ -12,7 +12,10 @@ RECT monitorRectangle(const std::string& monitor);
 LONG borderlessStyle(LONG style);
 LONG borderlessExtendedStyle(LONG extendedStyle);
 
-// Makes the window a borderless, non-topmost popup exactly covering the monitor, unless it already is. Returns
+// The game window's rectangle: the monitor's, reaching windowRowsAboveMonitor rows above it.
+RECT gameWindowRectangle(const std::string& monitor);
+
+// Makes the window a borderless, non-topmost popup covering the monitor, unless it already is. Returns
 // true when it had to change something.
 bool placeBorderless(HWND window, const std::string& monitor);
 
