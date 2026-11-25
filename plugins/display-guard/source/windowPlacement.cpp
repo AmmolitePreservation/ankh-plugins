@@ -49,24 +49,8 @@ LONG borderlessStyle(LONG style) {
   return (style & ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_BORDER)) | WS_POPUP;
 }
 
-// Some drivers hand a window that covers its monitor exactly the screen itself, as they do a fullscreen game, and switch
-// an HDR monitor in and out of HDR as it gains and loses the foreground. Windows always composes a layered window, so
-// the game's window is one.
 LONG borderlessExtendedStyle(LONG extendedStyle) {
-  return (extendedStyle & ~(WS_EX_TOPMOST | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_STATICEDGE)) |
-    WS_EX_LAYERED;
-}
-
-// A layered window shows nothing until it has its attributes: it is made fully opaque.
-static void keepLayeredOpaque(HWND window) {
-  BYTE alpha = 0;
-  DWORD flags = 0;
-  if (GetLayeredWindowAttributes(window, nullptr, &alpha, &flags) && flags == LWA_ALPHA && alpha == 255) {
-    return;
-  }
-  if (!SetLayeredWindowAttributes(window, 0, 255, LWA_ALPHA)) {
-    fatalError("SetLayeredWindowAttributes failed for the game's window (error %lu)", GetLastError());
-  }
+  return extendedStyle & ~(WS_EX_TOPMOST | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_STATICEDGE);
 }
 
 bool placeBorderless(HWND window, const std::string& monitor) {
@@ -80,12 +64,10 @@ bool placeBorderless(HWND window, const std::string& monitor) {
     fatalError("GetWindowRect failed for the game's window (error %lu)", GetLastError());
   }
   if (style == wantedStyle && extendedStyle == wantedExtendedStyle && EqualRect(&current, &target)) {
-    keepLayeredOpaque(window);
     return false;
   }
   SetWindowLongA(window, GWL_STYLE, wantedStyle);
   SetWindowLongA(window, GWL_EXSTYLE, wantedExtendedStyle);
-  keepLayeredOpaque(window);
   if (!SetWindowPos(window, HWND_NOTOPMOST, target.left, target.top, target.right - target.left, target.bottom - target.top,
       SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOOWNERZORDER)) {
     fatalError("SetWindowPos failed for the game's window (error %lu)", GetLastError());
