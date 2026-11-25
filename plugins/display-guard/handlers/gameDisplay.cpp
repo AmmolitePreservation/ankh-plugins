@@ -3,6 +3,6 @@
 void prepareGameDisplay(const PluginHost*, const RECT&) {
 }
 
-LONG windowRowsAboveMonitor() {
-  return 0;
+TakeoverGuard gameTakeoverGuard() {
+  return TakeoverGuard::none;
 }

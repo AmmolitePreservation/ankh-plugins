@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gameDisplay.h"
+
 #include <windows.h>
 
 #include <string>
@@ -8,7 +10,14 @@
 // such as DISPLAY2. A name no monitor has is fatal, listing the ones there are.
 RECT monitorRectangle(const std::string& monitor);
 
-// The style and extended style of a borderless, non-topmost popup, keeping the other bits given.
+// The guard display-guard.cfg chose; set once at load, before any window is placed.
+void setTakeoverGuard(TakeoverGuard guard);
+
+// The rows the game's window reaches above its monitor: 1 with the rowAbove guard, else 0.
+LONG windowRowsAboveMonitor();
+
+// The style and extended style of a borderless, non-topmost popup, keeping the other bits given; layered with the
+// layered guard.
 LONG borderlessStyle(LONG style);
 LONG borderlessExtendedStyle(LONG extendedStyle);
 

@@ -1,7 +1,6 @@
 #include "gameWindow.h"
 
 #include "fatalError.h"
-#include "gameDisplay.h"
 #include "gameForeground.h"
 #include "hookRegistry.h"
 #include "inputHooks.h"
