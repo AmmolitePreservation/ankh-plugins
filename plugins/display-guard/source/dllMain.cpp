@@ -10,6 +10,7 @@
 #include "inputHooks.h"
 #include "presentationPolicy.h"
 #include "sessionLog.h"
+#include "user32Hook.h"
 #include "windowPlacement.h"
 #include "pluginHost.h"
 
@@ -47,6 +48,8 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
     configuration.monitor.c_str(), configuration.renderResolution == RenderResolution::native ? "native" : "game",
     configuration.startMinimized ? "true" : "false", configuration.releaseInput ? "true" : "false",
     configuration.confineCursor ? "true" : "false");
+  writeLogLine("INFO", "windowModulesConfigured count=%zu", configuration.windowModules.size());
+  setWindowModules(configuration.windowModules);
   const RECT target = monitorRectangle(configuration.monitor);
   writeLogLine("INFO", "monitorSelected monitor=%s left=%ld top=%ld width=%ld height=%ld", configuration.monitor.c_str(),
     target.left, target.top, target.right - target.left, target.bottom - target.top);
