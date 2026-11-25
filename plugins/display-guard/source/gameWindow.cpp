@@ -4,7 +4,6 @@
 #include "gameForeground.h"
 #include "hookRegistry.h"
 #include "inputHooks.h"
-#include "monitorCover.h"
 #include "presentationPolicy.h"
 #include "sessionLog.h"
 #include "user32Hook.h"
@@ -333,7 +332,6 @@ void adoptGameWindow(HWND window, UINT backBufferWidth, UINT backBufferHeight, b
       fatalError("Replacing the game window's procedure failed (error %lu)", error);
     }
     logAdoption(window);
-    coverMonitorCorner(monitorRectangle(monitor));
   }
   setGameBackBuffer(window, backBufferWidth, backBufferHeight);
   if (!isNew) {

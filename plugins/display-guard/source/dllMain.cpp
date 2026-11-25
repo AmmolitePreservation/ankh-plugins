@@ -1,6 +1,7 @@
 #include "configuration.h"
 #include "direct3DHooks.h"
 #include "openGLHooks.h"
+#include "openGLPresenter.h"
 #include "fatalError.h"
 #include "gameDisplay.h"
 #include "gammaHooks.h"
@@ -59,6 +60,7 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
   installGameWindowHooks(configuration);
   installDirect3DHooks(configuration);
   installOpenGLHooks(configuration);
+  installOpenGLPresenter();
   installInputHooks(configuration);
   installGammaHooks();
   writeLogLine("INFO", "loadComplete");
