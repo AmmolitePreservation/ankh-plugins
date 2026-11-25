@@ -38,6 +38,7 @@ static BOOL WINAPI setPixelFormatDetour(HDC deviceContext, int format, const PIX
 void installOpenGLHooks(const Configuration& configuration) {
   monitor = configuration.monitor;
   renderResolution = configuration.renderResolution;
-  installImportHook(GetModuleHandleA(nullptr), "gdi32.dll", "SetPixelFormat", reinterpret_cast<void*>(&setPixelFormatDetour),
+  // Hooked for the whole process: a game may draw through a library of its own, as SDL2 does.
+  installExportHook("gdi32.dll", "SetPixelFormat", reinterpret_cast<void*>(&setPixelFormatDetour),
     reinterpret_cast<void**>(&originalSetPixelFormat));
 }

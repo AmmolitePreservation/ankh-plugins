@@ -276,6 +276,7 @@ BOOL WINAPI swapBuffersDetour(HDC deviceContextHandle) {
 }
 
 void installOpenGLPresenter() {
-  installImportHook(GetModuleHandleA(nullptr), "gdi32.dll", "SwapBuffers", reinterpret_cast<void*>(&swapBuffersDetour),
+  // Hooked for the whole process: a game may present through a library of its own, as SDL2 does.
+  installExportHook("gdi32.dll", "SwapBuffers", reinterpret_cast<void*>(&swapBuffersDetour),
     reinterpret_cast<void**>(&originalSwapBuffers));
 }

@@ -37,10 +37,10 @@ static void writeSetting(const std::string& path, const char* section, const cha
 
 extern "C" {
 
-// The game reads JadeEmpire.ini before it creates its window. With d3d9-borderless its only display mode is the
-// desktop's, so this sets the primary monitor's desktop mode in [Render] (the game draws on adapter 0), widescreen
-// unless the monitor is 4:3, and turns the game's own 30 frames per second cap ([Game] ClampFPS) off, since
-// d3d9-borderless's frameRateLimit holds the frame rate instead. In the configuration program it does nothing.
+// The game reads JadeEmpire.ini before it creates its window. display-guard shows it at the desktop's mode, so this
+// sets the primary monitor's desktop mode in [Render] (the game draws on adapter 0), widescreen unless the monitor is
+// 4:3, and turns the game's own 30 frames per second cap ([Game] ClampFPS) off, since frame-control holds the frame
+// rate at the monitor's refresh rate instead. In the configuration program it does nothing.
 __declspec(dllexport) DWORD Load(const PluginHost* host) {
   if (isLoaded) {
     fatalError("Load was called twice");

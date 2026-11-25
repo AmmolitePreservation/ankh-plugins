@@ -1,9 +1,9 @@
 # SOMA borderless window fix
-Stops SOMA's borderless window from blanking the screen for a few seconds each time the game gains or loses focus. On an HDR monitor with an NVIDIA card, the driver treats a window that exactly covers the monitor as fullscreen and switches the monitor out of HDR and back; this release puts a one-pixel, nearly transparent window over the monitor's corner, so the driver leaves the game's window alone.
+Stops SOMA's borderless window from blanking the screen for a few seconds each time the game gains or loses focus. On an HDR monitor with an NVIDIA card, the driver treats a window that exactly covers the monitor as fullscreen and switches the monitor out of HDR and back; this release shows SOMA's OpenGL frames the way Direct3D games are shown, through Windows' own desktop composition, so the driver has no OpenGL window to take over. The game runs as a borderless window covering the monitor whatever display mode it is set to.
 
 ## Install
 1. Extract the zip into the folder that holds `Soma.exe`. In Steam: right-click SOMA, Manage, Browse local files.
-2. Play with SOMA's display mode set to borderless.
+2. Play.
 
 It adds `version.dll` beside `Soma.exe` and an `ankh-plugins` folder, and changes none of the game's files.
 
