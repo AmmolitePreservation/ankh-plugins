@@ -4,7 +4,7 @@
 steam-locator.dll
 config-bypass.dll
 render-settings.dll
-d3d9-borderless.dll
+display-guard.dll
 time-fixes.dll
 intro-hold.dll
-borderless-fit.dll
+frame-control.dll
