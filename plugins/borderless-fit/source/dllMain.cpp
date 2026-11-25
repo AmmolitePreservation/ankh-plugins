@@ -1,12 +1,9 @@
 #include "fatalError.h"
 #include "hookRegistry.h"
 #include "sessionLog.h"
-#include "settingsFile.h"
 #include "pluginHost.h"
 
 #include <windows.h>
-
-#include <string>
 
 #ifndef ankhPluginsBuildCommit
 #error "ankhPluginsBuildCommit must be defined by the build (see build.ps1)"
@@ -18,12 +15,10 @@ typedef BOOL (WINAPI* SetWindowPosFunction)(HWND, HWND, int, int, int, int, UINT
 typedef BOOL (WINAPI* MoveWindowFunction)(HWND, int, int, int, int, BOOL);
 
 static const char* const pluginName = "borderless-fit";
-static const char* const borderlessFitVersion = "0.1.0";
-static const char* const configurationFileName = "borderless-fit.cfg";
+static const char* const borderlessFitVersion = "0.2.0";
 
 static bool isLoaded = false;
 static DWORD gameMainThreadID = 0;
-static int heightAdjustment = 0;
 static CreateWindowExWFunction originalCreateWindowExW = nullptr;
 static CreateWindowExAFunction originalCreateWindowExA = nullptr;
 static SetWindowPosFunction originalSetWindowPos = nullptr;
@@ -43,32 +38,52 @@ static BOOL CALLBACK matchMonitor(HMONITOR, HDC, LPRECT bounds, LPARAM searchAdd
   return TRUE;
 }
 
-// The main thread's popup windows asking for exactly a monitor's rectangle are the borderless game window.
-static void fitHeight(const char* function, DWORD style, HWND parent, int x, int y, int width, int* height) {
-  if (heightAdjustment == 0 || GetCurrentThreadId() != gameMainThreadID || parent != nullptr || (style & WS_POPUP) == 0 ||
-      (style & WS_CHILD) != 0) {
-    return;
+// The main thread's popup windows asking for exactly a monitor's rectangle are the borderless game window. Some drivers
+// hand such a window the screen itself, as they do a fullscreen game, and switch an HDR monitor in and out of HDR as it
+// gains and loses the foreground; Windows always composes a layered window, so it becomes one.
+static bool isBorderlessGameWindow(DWORD style, HWND parent, int x, int y, int width, int height) {
+  if (GetCurrentThreadId() != gameMainThreadID || parent != nullptr || (style & WS_POPUP) == 0 || (style & WS_CHILD) != 0) {
+    return false;
   }
-  MonitorSearch search = { { x, y, x + width, y + *height }, false };
+  MonitorSearch search = { { x, y, x + width, y + height }, false };
   EnumDisplayMonitors(nullptr, nullptr, &matchMonitor, reinterpret_cast<LPARAM>(&search));
-  if (!search.isMonitorRect) {
+  return search.isMonitorRect;
+}
+
+// A layered window shows nothing until it has its attributes: it is made fully opaque.
+static void makeLayeredOpaque(HWND window, const char* function) {
+  const LONG_PTR extendedStyle = GetWindowLongPtrW(window, GWL_EXSTYLE);
+  BYTE alpha = 0;
+  DWORD flags = 0;
+  if ((extendedStyle & WS_EX_LAYERED) != 0 && GetLayeredWindowAttributes(window, nullptr, &alpha, &flags) &&
+      flags == LWA_ALPHA && alpha == 255) {
     return;
   }
-  writeLogLine("INFO", "windowFitted function=%s x=%d y=%d width=%d askedHeight=%d height=%d", function, x, y, width, *height,
-    *height + heightAdjustment);
-  *height += heightAdjustment;
+  SetWindowLongPtrW(window, GWL_EXSTYLE, extendedStyle | WS_EX_LAYERED);
+  if (!SetLayeredWindowAttributes(window, 0, 255, LWA_ALPHA)) {
+    fatalError("SetLayeredWindowAttributes failed for window %p (error %lu)", static_cast<void*>(window), GetLastError());
+  }
+  writeLogLine("INFO", "windowLayered function=%s window=%p", function, static_cast<void*>(window));
 }
 
 static HWND WINAPI createWindowExWDetour(DWORD exStyle, LPCWSTR className, LPCWSTR title, DWORD style, int x, int y, int width,
     int height, HWND parent, HMENU menu, HINSTANCE instance, LPVOID parameter) {
-  fitHeight("CreateWindowExW", style, parent, x, y, width, &height);
-  return originalCreateWindowExW(exStyle, className, title, style, x, y, width, height, parent, menu, instance, parameter);
+  const HWND window =
+    originalCreateWindowExW(exStyle, className, title, style, x, y, width, height, parent, menu, instance, parameter);
+  if (window != nullptr && isBorderlessGameWindow(style, parent, x, y, width, height)) {
+    makeLayeredOpaque(window, "CreateWindowExW");
+  }
+  return window;
 }
 
 static HWND WINAPI createWindowExADetour(DWORD exStyle, LPCSTR className, LPCSTR title, DWORD style, int x, int y, int width,
     int height, HWND parent, HMENU menu, HINSTANCE instance, LPVOID parameter) {
-  fitHeight("CreateWindowExA", style, parent, x, y, width, &height);
-  return originalCreateWindowExA(exStyle, className, title, style, x, y, width, height, parent, menu, instance, parameter);
+  const HWND window =
+    originalCreateWindowExA(exStyle, className, title, style, x, y, width, height, parent, menu, instance, parameter);
+  if (window != nullptr && isBorderlessGameWindow(style, parent, x, y, width, height)) {
+    makeLayeredOpaque(window, "CreateWindowExA");
+  }
+  return window;
 }
 
 static bool isTopLevel(HWND window) {
@@ -86,15 +101,18 @@ static BOOL WINAPI setWindowPosDetour(HWND window, HWND insertAfter, int x, int 
       }
       position = { bounds.left, bounds.top };
     }
-    fitHeight("SetWindowPos", static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE)), nullptr, position.x, position.y, width,
-      &height);
+    if (isBorderlessGameWindow(static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE)), nullptr, position.x, position.y,
+        width, height)) {
+      makeLayeredOpaque(window, "SetWindowPos");
+    }
   }
   return originalSetWindowPos(window, insertAfter, x, y, width, height, flags);
 }
 
 static BOOL WINAPI moveWindowDetour(HWND window, int x, int y, int width, int height, BOOL repaint) {
-  if (isTopLevel(window)) {
-    fitHeight("MoveWindow", static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE)), nullptr, x, y, width, &height);
+  if (isTopLevel(window) &&
+      isBorderlessGameWindow(static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE)), nullptr, x, y, width, height)) {
+    makeLayeredOpaque(window, "MoveWindow");
   }
   return originalMoveWindow(window, x, y, width, height, repaint);
 }
@@ -118,20 +136,6 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
   openSessionLog(host->pluginDirectory, pluginName, host->sessionStamp);
   writeLogLine("INFO", "sessionStart version=%s buildCommit=%s mainThreadID=%lu", borderlessFitVersion, ankhPluginsBuildCommit,
     GetCurrentThreadId());
-  std::string adjustment;
-  const SettingDefinition definitions[] = {
-    { "heightAdjustment", SettingKind::text, &adjustment, false },
-  };
-  loadSettingsFile(host->pluginDirectory, configurationFileName, definitions, sizeof(definitions) / sizeof(definitions[0]));
-  if (adjustment == "taller") {
-    heightAdjustment = 1;
-  } else if (adjustment == "shorter") {
-    heightAdjustment = -1;
-  } else if (adjustment != "none") {
-    fatalError("%s: heightAdjustment must be taller, shorter or none, not %s", configurationFileName, adjustment.c_str());
-  }
-  writeLogLine("INFO", "configurationLoaded heightAdjustment=%s", adjustment.c_str());
-
   gameMainThreadID = host->mainThreadID;
   initializeHookRegistry();
   hookUser32("CreateWindowExW", &createWindowExWDetour, &originalCreateWindowExW);

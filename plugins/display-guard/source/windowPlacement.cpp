@@ -49,33 +49,16 @@ LONG borderlessStyle(LONG style) {
   return (style & ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_BORDER)) | WS_POPUP;
 }
 
-static TakeoverGuard takeoverGuard = TakeoverGuard::none;
-
-void setTakeoverGuard(TakeoverGuard guard) {
-  takeoverGuard = guard;
-}
-
-LONG windowRowsAboveMonitor() {
-  return takeoverGuard == TakeoverGuard::rowAbove ? 1 : 0;
-}
-
+// Some drivers hand a window that covers its monitor exactly the screen itself, as they do a fullscreen game, and switch
+// an HDR monitor in and out of HDR as it gains and loses the foreground. Windows always composes a layered window, so
+// the game's window is one.
 LONG borderlessExtendedStyle(LONG extendedStyle) {
-  const LONG borderless =
-    extendedStyle & ~(WS_EX_TOPMOST | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_STATICEDGE);
-  return takeoverGuard == TakeoverGuard::layered ? borderless | WS_EX_LAYERED : borderless;
-}
-
-RECT gameWindowRectangle(const std::string& monitor) {
-  RECT rectangle = monitorRectangle(monitor);
-  rectangle.top -= windowRowsAboveMonitor();
-  return rectangle;
+  return (extendedStyle & ~(WS_EX_TOPMOST | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_STATICEDGE)) |
+    WS_EX_LAYERED;
 }
 
 // A layered window shows nothing until it has its attributes: it is made fully opaque.
 static void keepLayeredOpaque(HWND window) {
-  if (takeoverGuard != TakeoverGuard::layered) {
-    return;
-  }
   BYTE alpha = 0;
   DWORD flags = 0;
   if (GetLayeredWindowAttributes(window, nullptr, &alpha, &flags) && flags == LWA_ALPHA && alpha == 255) {
@@ -87,7 +70,7 @@ static void keepLayeredOpaque(HWND window) {
 }
 
 bool placeBorderless(HWND window, const std::string& monitor) {
-  const RECT target = gameWindowRectangle(monitor);
+  const RECT target = monitorRectangle(monitor);
   const LONG style = GetWindowLongA(window, GWL_STYLE);
   const LONG extendedStyle = GetWindowLongA(window, GWL_EXSTYLE);
   const LONG wantedStyle = borderlessStyle(style);

@@ -108,8 +108,7 @@ static bool letterboxOf(HWND window, Letterbox* letterbox) {
   // The window covers the monitor, so the picture is placed in the monitor's size rather than the live client
   // rectangle, which is empty while the window is minimized.
   const RECT target = monitorRectangle(monitor);
-  const LONG rowsAbove = windowRowsAboveMonitor();
-  const RECT client = { 0, rowsAbove, target.right - target.left, target.bottom - target.top + rowsAbove };
+  const RECT client = { 0, 0, target.right - target.left, target.bottom - target.top };
   const RECT picture = presentationRectangle(game.backBufferWidth, game.backBufferHeight, client);
   if (IsRectEmpty(&picture)) {
     fatalError("A %ux%u back buffer has no picture in a %ldx%ld window", game.backBufferWidth, game.backBufferHeight,

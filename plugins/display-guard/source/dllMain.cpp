@@ -42,12 +42,10 @@ __declspec(dllexport) DWORD Load(const PluginHost* host) {
     GetCurrentThreadId());
 
   const Configuration configuration = loadConfiguration(pluginDirectory);
-  writeLogLine("INFO",
-    "configurationLoaded monitor=%s renderResolution=%s startMinimized=%s releaseInput=%s confineCursor=%s takeoverGuard=%s",
+  writeLogLine("INFO", "configurationLoaded monitor=%s renderResolution=%s startMinimized=%s releaseInput=%s confineCursor=%s",
     configuration.monitor.c_str(), configuration.renderResolution == RenderResolution::native ? "native" : "game",
     configuration.startMinimized ? "true" : "false", configuration.releaseInput ? "true" : "false",
-    configuration.confineCursor ? "true" : "false", takeoverGuardName(configuration.takeoverGuard));
-  setTakeoverGuard(configuration.takeoverGuard);
+    configuration.confineCursor ? "true" : "false");
   const RECT target = monitorRectangle(configuration.monitor);
   writeLogLine("INFO", "monitorSelected monitor=%s left=%ld top=%ld width=%ld height=%ld", configuration.monitor.c_str(),
     target.left, target.top, target.right - target.left, target.bottom - target.top);
