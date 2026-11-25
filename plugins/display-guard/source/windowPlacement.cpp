@@ -1,7 +1,6 @@
 #include "windowPlacement.h"
 
 #include "fatalError.h"
-#include "gameDisplay.h"
 
 #include <vector>
 
@@ -50,14 +49,41 @@ LONG borderlessStyle(LONG style) {
   return (style & ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_BORDER)) | WS_POPUP;
 }
 
+static TakeoverGuard takeoverGuard = TakeoverGuard::none;
+
+void setTakeoverGuard(TakeoverGuard guard) {
+  takeoverGuard = guard;
+}
+
+LONG windowRowsAboveMonitor() {
+  return takeoverGuard == TakeoverGuard::rowAbove ? 1 : 0;
+}
+
 LONG borderlessExtendedStyle(LONG extendedStyle) {
-  return extendedStyle & ~(WS_EX_TOPMOST | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_STATICEDGE);
+  const LONG borderless =
+    extendedStyle & ~(WS_EX_TOPMOST | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_STATICEDGE);
+  return takeoverGuard == TakeoverGuard::layered ? borderless | WS_EX_LAYERED : borderless;
 }
 
 RECT gameWindowRectangle(const std::string& monitor) {
   RECT rectangle = monitorRectangle(monitor);
   rectangle.top -= windowRowsAboveMonitor();
   return rectangle;
+}
+
+// A layered window shows nothing until it has its attributes: it is made fully opaque.
+static void keepLayeredOpaque(HWND window) {
+  if (takeoverGuard != TakeoverGuard::layered) {
+    return;
+  }
+  BYTE alpha = 0;
+  DWORD flags = 0;
+  if (GetLayeredWindowAttributes(window, nullptr, &alpha, &flags) && flags == LWA_ALPHA && alpha == 255) {
+    return;
+  }
+  if (!SetLayeredWindowAttributes(window, 0, 255, LWA_ALPHA)) {
+    fatalError("SetLayeredWindowAttributes failed for the game's window (error %lu)", GetLastError());
+  }
 }
 
 bool placeBorderless(HWND window, const std::string& monitor) {
@@ -71,10 +97,12 @@ bool placeBorderless(HWND window, const std::string& monitor) {
     fatalError("GetWindowRect failed for the game's window (error %lu)", GetLastError());
   }
   if (style == wantedStyle && extendedStyle == wantedExtendedStyle && EqualRect(&current, &target)) {
+    keepLayeredOpaque(window);
     return false;
   }
   SetWindowLongA(window, GWL_STYLE, wantedStyle);
   SetWindowLongA(window, GWL_EXSTYLE, wantedExtendedStyle);
+  keepLayeredOpaque(window);
   if (!SetWindowPos(window, HWND_NOTOPMOST, target.left, target.top, target.right - target.left, target.bottom - target.top,
       SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOOWNERZORDER)) {
     fatalError("SetWindowPos failed for the game's window (error %lu)", GetLastError());

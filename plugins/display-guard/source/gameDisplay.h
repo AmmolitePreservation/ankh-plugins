@@ -11,8 +11,11 @@
 // Called once from Load, before any game code runs, with the rectangle of the monitor the game will cover.
 void prepareGameDisplay(const PluginHost* host, const RECT& monitor);
 
-// How many rows the game's window reaches above its monitor; the default is 0. Some drivers hand a window that covers
-// its monitor exactly the screen itself, as they do a fullscreen game, and switch the monitor in and out of HDR as it
-// gains and loses the foreground; a window one row taller is left to the desktop. The rows go above the monitor because
-// OpenGL draws from the bottom of a window, so the game's picture still fills the monitor.
-LONG windowRowsAboveMonitor();
+// Some drivers hand a window that covers its monitor exactly the screen itself, as they do a fullscreen game, and switch
+// the monitor in and out of HDR as it gains and loses the foreground. A guard keeps the window with the desktop:
+// rowAbove makes it reach one row above the monitor (above, because OpenGL draws from the bottom of a window, so the
+// game's picture still fills the monitor); layered makes it a layered window, which Windows always composes.
+enum class TakeoverGuard { none, rowAbove, layered };
+
+// The guard the game needs; the default is none. display-guard.cfg's takeoverGuard can name another.
+TakeoverGuard gameTakeoverGuard();
