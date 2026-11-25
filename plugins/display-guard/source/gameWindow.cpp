@@ -615,7 +615,7 @@ void installGameWindowHooks(const Configuration& configuration) {
   hookedCount += hookUser32("ScreenToClient", &screenToClientDetour, &originalScreenToClient);
   hookedCount += hookUser32("SetForegroundWindow", &setForegroundWindowDetour, &originalSetForegroundWindow);
   if (hookedCount == 0) {
-    fatalError("The game's executable imports none of the window functions display-guard changes: its window code "
-      "is in a library, which display-guard does not cover");
+    fatalError("Neither the game's executable nor a library in display-guard.cfg's windowModules imports a window function "
+      "display-guard changes: name the game's library that makes its window calls in windowModules");
   }
 }

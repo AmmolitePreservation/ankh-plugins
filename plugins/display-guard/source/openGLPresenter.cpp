@@ -48,6 +48,9 @@ typedef void (APIENTRY* BlitFramebufferFunction)(GLint, GLint, GLint, GLint, GLi
 typedef HANDLE (WINAPI* DXOpenDeviceFunction)(void*);
 typedef HANDLE (WINAPI* DXRegisterObjectFunction)(HANDLE, void*, GLuint, GLenum, GLenum);
 typedef BOOL (WINAPI* DXLockObjectsFunction)(HANDLE, GLint, HANDLE*);
+typedef BOOL (WINAPI* DXUnregisterObjectFunction)(HANDLE, HANDLE);
+typedef void (APIENTRY* DeleteFramebuffersFunction)(GLsizei, const GLuint*);
+typedef void (WINAPI* DeleteTexturesFunction)(GLsizei, const GLuint*);
 typedef HRESULT (WINAPI* CreateDeviceFunction)(IDXGIAdapter*, D3D_DRIVER_TYPE, HMODULE, UINT, const D3D_FEATURE_LEVEL*, UINT,
   UINT, ID3D11Device**, D3D_FEATURE_LEVEL*, ID3D11DeviceContext**);
 
@@ -67,6 +70,10 @@ struct GLFunctions {
   DXRegisterObjectFunction dxRegisterObject;
   DXLockObjectsFunction dxLockObjects;
   DXLockObjectsFunction dxUnlockObjects;
+  DXUnregisterObjectFunction dxUnregisterObject;
+  DeleteFramebuffersFunction deleteFramebuffers;
+  DeleteTexturesFunction deleteTextures;
+  GetCurrentContextFunction getCurrentContext;
 };
 
 // Touched only on the game's render thread, the one that calls SwapBuffers with its context current.
@@ -80,6 +87,8 @@ ID3D11DeviceContext* deviceContext = nullptr;
 IDXGISwapChain1* swapChain = nullptr;
 ID3D11Texture2D* sharedTexture = nullptr;
 HANDLE interopDevice = nullptr;
+// The OpenGL context the sharing was opened in and the game's objects were made in.
+HGLRC presentedContext = nullptr;
 HANDLE interopTexture = nullptr;
 GLuint framebuffer = 0;
 GLuint sharedTextureName = 0;
@@ -126,6 +135,10 @@ void loadFunctions() {
   gl.dxRegisterObject = openGLFunction<DXRegisterObjectFunction>("wglDXRegisterObjectNV", true);
   gl.dxLockObjects = openGLFunction<DXLockObjectsFunction>("wglDXLockObjectsNV", true);
   gl.dxUnlockObjects = openGLFunction<DXLockObjectsFunction>("wglDXUnlockObjectsNV", true);
+  gl.dxUnregisterObject = openGLFunction<DXUnregisterObjectFunction>("wglDXUnregisterObjectNV", true);
+  gl.deleteFramebuffers = openGLFunction<DeleteFramebuffersFunction>("glDeleteFramebuffers", true);
+  gl.deleteTextures = openGLFunction<DeleteTexturesFunction>("glDeleteTextures", false);
+  gl.getCurrentContext = openGLFunction<GetCurrentContextFunction>("wglGetCurrentContext", false);
 }
 
 void createDevice() {
@@ -140,10 +153,38 @@ void createDevice() {
   }
   requireResult(createDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
     D3D11_SDK_VERSION, &device, nullptr, &deviceContext), "D3D11CreateDevice");
+}
+
+// In the context current now. A sharing opened in a context the game has since destroyed is left as it is: closing
+// it would need that context.
+void openSharing() {
   interopDevice = gl.dxOpenDevice(device);
   if (interopDevice == nullptr) {
     fatalError("wglDXOpenDeviceNV failed (error %lu): the graphics driver cannot share OpenGL with Direct3D 11", GetLastError());
   }
+  presentedContext = gl.getCurrentContext();
+}
+
+// The swap chain and the shared texture go; their OpenGL side too while its context is still the current one.
+void releaseSurfaces(bool isContextAlive) {
+  if (isContextAlive) {
+    if (!gl.dxUnregisterObject(interopDevice, interopTexture)) {
+      fatalError("wglDXUnregisterObjectNV failed (error %lu)", GetLastError());
+    }
+    gl.deleteFramebuffers(1, &framebuffer);
+    gl.deleteTextures(1, &sharedTextureName);
+  }
+  interopTexture = nullptr;
+  framebuffer = 0;
+  sharedTextureName = 0;
+  sharedTexture->Release();
+  sharedTexture = nullptr;
+  swapChain->Release();
+  swapChain = nullptr;
+  // Direct3D destroys a released swap chain only after this, and the window takes no new one before.
+  deviceContext->ClearState();
+  deviceContext->Flush();
+  presentedWindow = nullptr;
 }
 
 // The swap chain and the shared texture, at the window's back buffer size.
@@ -257,10 +298,17 @@ BOOL WINAPI swapBuffersDetour(HDC deviceContextHandle) {
     loadFunctions();
     createDevice();
   }
+  // A game can make a new window, or a new context, when it changes its display mode, as SDL does; the presentation
+  // follows it.
+  if (gl.getCurrentContext() != presentedContext) {
+    if (swapChain != nullptr) {
+      releaseSurfaces(false);
+    }
+    openSharing();
+  }
   if (presentedWindow != window || presentedWidth != width || presentedHeight != height) {
     if (swapChain != nullptr) {
-      fatalError("The game's window or back buffer changed from %ux%u to %ux%u, which the Direct3D presentation does not "
-        "follow", presentedWidth, presentedHeight, width, height);
+      releaseSurfaces(true);
     }
     createSurfaces(window, width, height);
   }
